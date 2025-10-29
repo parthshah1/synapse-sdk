@@ -20,8 +20,7 @@
 import { ethers } from 'ethers'
 import type { SPRegistryService } from '../sp-registry/index.ts'
 import type { ProviderInfo } from '../sp-registry/types.ts'
-import { CONTRACT_ABIS, CONTRACT_ADDRESSES } from '../utils/constants.ts'
-import { getFilecoinNetworkType } from '../utils/index.ts'
+import { CONTRACT_ABIS } from '../utils/constants.ts'
 import type { WarmStorageService } from '../warm-storage/index.ts'
 
 export class ProviderResolver {
@@ -80,8 +79,7 @@ export class ProviderResolver {
     try {
       // Get provider to access network
       const provider = this.warmStorage.getProvider()
-      const network = await getFilecoinNetworkType(provider)
-      const multicall3Address = CONTRACT_ADDRESSES.MULTICALL3[network]
+      const multicall3Address = this.warmStorage.getMulticall3Address()
 
       // Create Multicall3 contract instance
       const multicall = new ethers.Contract(multicall3Address, CONTRACT_ABIS.MULTICALL3, provider)

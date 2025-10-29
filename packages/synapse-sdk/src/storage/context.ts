@@ -96,6 +96,14 @@ export class StorageContext {
     return this._withCDN
   }
 
+  private static normalizeWithCDN(synapse: Synapse, requested: boolean, context: string): boolean {
+    if (synapse.getNetwork() === 'devnet' && requested) {
+      console.warn(`CDN is not available on devnet. Ignoring withCDN=true request in ${context}.`)
+      return false
+    }
+    return requested
+  }
+
   // Getter for provider info
   get provider(): ProviderInfo {
     return this._provider
@@ -149,7 +157,11 @@ export class StorageContext {
     this._synapse = synapse
     this._provider = provider
     this._dataSetId = dataSetId
-    this._withCDN = options.withCDN ?? false
+    this._withCDN = StorageContext.normalizeWithCDN(
+      synapse,
+      options.withCDN ?? false,
+      'StorageContext constructor'
+    )
     this._signer = synapse.getSigner()
     this._warmStorageService = warmStorageService
     this._uploadBatchSize = Math.max(1, options.uploadBatchSize ?? SIZE_CONSTANTS.DEFAULT_UPLOAD_BATCH_SIZE)
@@ -183,20 +195,35 @@ export class StorageContext {
   ): Promise<StorageContext> {
     // Create SPRegistryService and ProviderResolver
     const registryAddress = warmStorageService.getServiceProviderRegistryAddress()
-    const spRegistry = new SPRegistryService(synapse.getProvider(), registryAddress)
+    const spRegistry = new SPRegistryService(
+      synapse.getProvider(),
+      registryAddress,
+      synapse.getMulticall3Address()
+    )
     const providerResolver = new ProviderResolver(warmStorageService, spRegistry)
+
+    const normalizedWithCDN = StorageContext.normalizeWithCDN(
+      synapse,
+      options.withCDN ?? false,
+      'StorageContext.create'
+    )
+
+    const normalizedOptions: StorageServiceOptions = {
+      ...options,
+      withCDN: normalizedWithCDN,
+    }
 
     // Resolve provider and data set based on options
     const resolution = await StorageContext.resolveProviderAndDataSet(
       synapse,
       warmStorageService,
       providerResolver,
-      options
+      normalizedOptions
     )
 
     // Notify callback about provider selection
     try {
-      options.callbacks?.onProviderSelected?.(resolution.provider)
+      normalizedOptions.callbacks?.onProviderSelected?.(resolution.provider)
     } catch (error) {
       // Log but don't propagate callback errors
       console.error('Error in onProviderSelected callback:', error)
@@ -210,9 +237,9 @@ export class StorageContext {
         synapse,
         warmStorageService,
         resolution.provider,
-        options.withCDN ?? false,
-        options.callbacks,
-        options.metadata
+        normalizedWithCDN,
+        normalizedOptions.callbacks,
+        normalizedOptions.metadata
       )
     } else {
       // Use existing data set
@@ -220,7 +247,7 @@ export class StorageContext {
 
       // Notify callback about resolved data set
       try {
-        options.callbacks?.onDataSetResolved?.({
+        normalizedOptions.callbacks?.onDataSetResolved?.({
           isExisting: resolution.isExisting ?? true,
           dataSetId: finalDataSetId,
           provider: resolution.provider,
@@ -235,7 +262,7 @@ export class StorageContext {
       warmStorageService,
       resolution.provider,
       finalDataSetId,
-      options,
+      normalizedOptions,
       resolution.dataSetMetadata
     )
   }
@@ -252,6 +279,12 @@ export class StorageContext {
     metadata?: Record<string, string>
   ): Promise<number> {
     performance.mark('synapse:createDataSet-start')
+
+    const normalizedWithCDN = StorageContext.normalizeWithCDN(
+      synapse,
+      withCDN,
+      'StorageContext.createDataSet'
+    )
 
     const signer = synapse.getSigner()
     const clientAddress = await synapse.getClient().getAddress()
@@ -274,7 +307,7 @@ export class StorageContext {
     // Prepare metadata - merge withCDN flag into metadata if needed
     const baseMetadataObj = metadata ?? {}
     const metadataObj =
-      withCDN && !(METADATA_KEYS.WITH_CDN in baseMetadataObj)
+      normalizedWithCDN && !(METADATA_KEYS.WITH_CDN in baseMetadataObj)
         ? { ...baseMetadataObj, [METADATA_KEYS.WITH_CDN]: '' }
         : baseMetadataObj
 

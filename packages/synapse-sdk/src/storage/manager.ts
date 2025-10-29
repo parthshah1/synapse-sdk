@@ -108,6 +108,14 @@ export class StorageManager {
     this._withIpni = withIpni
   }
 
+  private _coerceCDNFlag(requested: boolean): boolean {
+    if (this._synapse.getNetwork() === 'devnet' && requested) {
+      console.warn('CDN is not available on devnet. Ignoring withCDN=true request.')
+      return false
+    }
+    return requested
+  }
+
   /**
    * Upload data to storage
    * If context is provided, routes to context.upload()
@@ -174,7 +182,8 @@ export class StorageManager {
     }
 
     // Use withCDN setting: option > manager default > synapse default
-    const withCDN = options?.withCDN ?? this._withCDN
+    const requestedWithCDN = options?.withCDN ?? this._withCDN
+    const withCDN = this._coerceCDNFlag(requestedWithCDN)
 
     // Fast path: If we have a default context with CDN disabled and no specific provider requested,
     // check if the piece exists on the default context's provider first
@@ -227,6 +236,8 @@ export class StorageManager {
       withCDN = true // Enable CDN when key exists (matches contract behavior)
     }
 
+    withCDN = this._coerceCDNFlag(withCDN)
+
     // Use the static method from StorageContext for core logic
     return await StorageContext.performPreflightCheck(this._warmStorageService, this._synapse.payments, size, withCDN)
   }
@@ -236,7 +247,8 @@ export class StorageManager {
    */
   async createContext(options?: StorageServiceOptions): Promise<StorageContext> {
     // Determine the effective withCDN setting
-    const effectiveWithCDN = options?.withCDN ?? this._withCDN
+    const requestedWithCDN = options?.withCDN ?? this._withCDN
+    const effectiveWithCDN = this._coerceCDNFlag(requestedWithCDN)
 
     // Check if we can return the default context
     // We can use the default if:
@@ -357,7 +369,11 @@ export class StorageManager {
 
       // Create SPRegistryService and ProviderResolver to get providers
       const registryAddress = this._warmStorageService.getServiceProviderRegistryAddress()
-      const spRegistry = new SPRegistryService(this._synapse.getProvider(), registryAddress)
+      const spRegistry = new SPRegistryService(
+        this._synapse.getProvider(),
+        registryAddress,
+        this._synapse.getMulticall3Address()
+      )
       const resolver = new ProviderResolver(this._warmStorageService, spRegistry)
 
       // Fetch all data in parallel for performance

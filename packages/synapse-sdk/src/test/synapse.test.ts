@@ -171,6 +171,26 @@ describe('Synapse', () => {
       assert.exists(synapse)
     })
 
+    it('should accept devnet with runtime configuration', async () => {
+      server.use(
+        JSONRPC({
+          ...presets.basic,
+          eth_chainId: '0x1df5e76',
+        })
+      )
+
+      const synapse = await Synapse.create({
+        provider,
+        warmStorageAddress: ADDRESSES.calibration.warmStorage,
+        multicall3Address: ADDRESSES.calibration.multicall3,
+        genesisTimestamp: 1_700_000_000,
+      })
+
+      assert.exists(synapse)
+      assert.equal(synapse.getNetwork(), 'devnet')
+      assert.equal(synapse.getMulticall3Address().toLowerCase(), ADDRESSES.calibration.multicall3.toLowerCase())
+    })
+
     // custom addresses are not used anymore in the SDK
     it.skip('should accept custom pdpVerifierAddress', async () => {
       const customPDPVerifierAddress = '0xabcdef1234567890123456789012345678901234'
