@@ -10,10 +10,13 @@
  */
 
 import { ethers } from 'ethers'
-import { SPRegistryService } from '../packages/synapse-sdk/src/sp-registry/index.ts'
-import { CONTRACT_ADDRESSES, RPC_URLS } from '../packages/synapse-sdk/src/utils/constants.ts'
-import { getFilecoinNetworkType } from '../packages/synapse-sdk/src/utils/network.ts'
-import { WarmStorageService } from '../packages/synapse-sdk/src/warm-storage/index.ts'
+import {
+  SPRegistryService,
+  WarmStorageService,
+  CONTRACT_ADDRESSES,
+  RPC_URLS,
+  getFilecoinNetworkType,
+} from '@filoz/synapse-sdk'
 
 // Default PDP offering values
 const PDP_DEFAULTS = {
