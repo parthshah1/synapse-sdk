@@ -65,6 +65,8 @@ export interface SynapseOptions {
   disableNonceManager?: boolean
   /** Override Warm Storage service contract address (defaults to network's default) */
   warmStorageAddress?: string
+  /** Override Warm Storage view contract address (defaults to address discovered on-chain) */
+  warmStorageViewAddress?: string
   /** Override PDPVerifier contract address (defaults to network's default) */
   pdpVerifierAddress?: string
   /** Override Multicall3 contract address (required for devnet) */

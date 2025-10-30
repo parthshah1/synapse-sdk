@@ -143,7 +143,8 @@ export class WarmStorageService {
   static async create(
     provider: ethers.Provider,
     warmStorageAddress: string,
-    multicall3Address: string | null = null
+    multicall3Address: string | null = null,
+    overrideViewAddress: string | null = null
   ): Promise<WarmStorageService> {
     // Get network from provider and validate it's a supported Filecoin network
     const networkName = await getFilecoinNetworkType(provider)
@@ -216,6 +217,10 @@ export class WarmStorageService {
       sessionKeyRegistry: iface.decodeFunctionResult('sessionKeyRegistry', results[6].returnData)[0],
     }
 
+    if (overrideViewAddress != null && overrideViewAddress !== ethers.ZeroAddress) {
+      addresses.viewContract = overrideViewAddress
+    }
+
     return new WarmStorageService(provider, warmStorageAddress, resolvedMulticallAddress, addresses)
   }
 
@@ -275,6 +280,13 @@ export class WarmStorageService {
   private _getWarmStorageViewContract(): ethers.Contract {
     if (this._warmStorageViewContract == null) {
       const viewAddress = this.getViewContractAddress()
+      if (viewAddress == null || viewAddress === ethers.ZeroAddress) {
+        throw createError(
+          'WarmStorageService',
+          '_getWarmStorageViewContract',
+          'Warm Storage view contract is not available on this network'
+        )
+      }
       this._warmStorageViewContract = new ethers.Contract(viewAddress, CONTRACT_ABIS.WARM_STORAGE_VIEW, this._provider)
     }
     return this._warmStorageViewContract
@@ -1030,9 +1042,14 @@ export class WarmStorageService {
    * @returns Array of approved provider IDs
    */
   async getApprovedProviderIds(): Promise<number[]> {
-    const viewContract = this._getWarmStorageViewContract()
-    const providerIds = await viewContract.getApprovedProviders(0n, 0n)
-    return providerIds.map((id: bigint) => Number(id))
+    try {
+      const viewContract = this._getWarmStorageViewContract()
+      const providerIds = await viewContract.getApprovedProviders(0n, 0n)
+      return providerIds.map((id: bigint) => Number(id))
+    } catch (error) {
+      console.warn('WarmStorageService.getApprovedProviderIds: returning empty list due to error', error)
+      return []
+    }
   }
 
   /**
@@ -1041,8 +1058,16 @@ export class WarmStorageService {
    * @returns Whether the provider is approved
    */
   async isProviderIdApproved(providerId: number): Promise<boolean> {
-    const viewContract = this._getWarmStorageViewContract()
-    return await viewContract.isProviderApproved(providerId)
+    try {
+      const viewContract = this._getWarmStorageViewContract()
+      return await viewContract.isProviderApproved(providerId)
+    } catch (error) {
+      console.warn(
+        `WarmStorageService.isProviderIdApproved: treating provider ${providerId} as not approved due to error`,
+        error
+      )
+      return false
+    }
   }
 
   /**

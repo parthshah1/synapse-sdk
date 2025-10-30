@@ -156,7 +156,8 @@ export class Synapse {
     const warmStorageService = await WarmStorageService.create(
       provider,
       resolvedWarmStorageAddress,
-      resolvedMulticall3Address
+      resolvedMulticall3Address,
+      options.warmStorageViewAddress ?? null
     )
 
     const withCDNEnabled = network !== 'devnet' && options.withCDN === true
