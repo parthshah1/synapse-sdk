@@ -74,11 +74,24 @@ async function getRegistryService(provider, options) {
   } else {
     const networkName = await getFilecoinNetworkType(provider)
     warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[networkName]
+    if (!warmStorageAddress) {
+      throw new Error(
+        `No WarmStorage address configured for network ${networkName}. Provide --warm or WARM_STORAGE_CONTRACT_ADDRESS.`
+      )
+    }
     console.log(`Using default WarmStorage for ${networkName}: ${warmStorageAddress}`)
   }
 
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS ?? options.view ?? null
+  const multicallOverride = process.env.MULTICALL3_ADDRESS ?? null
+
   // Create WarmStorageService and discover registry
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicallOverride,
+    warmStorageViewAddress
+  )
   const registryAddress = warmStorage.getServiceProviderRegistryAddress()
   console.log(`Discovered registry: ${registryAddress}`)
 
@@ -835,8 +848,8 @@ Examples:
 
   // Setup provider based on network flag
   const network = options.network || 'calibration'
-  if (network !== 'mainnet' && network !== 'calibration') {
-    console.error(`Error: Invalid network '${network}'. Must be 'mainnet' or 'calibration'`)
+  if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
+    console.error(`Error: Invalid network '${network}'. Must be 'mainnet', 'calibration', or 'devnet'`)
     process.exit(1)
   }
 

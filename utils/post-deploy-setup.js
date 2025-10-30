@@ -433,8 +433,8 @@ async function main() {
     const customRpcUrl = process.env.RPC_URL
 
     // Validate network
-    if (network !== 'mainnet' && network !== 'calibration') {
-      error('NETWORK must be either "mainnet" or "calibration"')
+    if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
+      error('NETWORK must be either "mainnet", "calibration", or "devnet"')
       process.exit(1)
     }
 
@@ -442,6 +442,9 @@ async function main() {
     const rpcURL = customRpcUrl || RPC_URLS[network].http
 
     // Get WarmStorage address - use provided or default from constants
+    const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS ?? null
+    const overrideMulticallAddress = process.env.MULTICALL3_ADDRESS ?? null
+
     let warmStorageAddress = process.env.WARM_STORAGE_CONTRACT_ADDRESS
     if (!warmStorageAddress) {
       warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[network]
@@ -467,7 +470,12 @@ async function main() {
     provider._getConnection().timeout = 120000 // 2 minutes
 
     // Create WarmStorage service
-    const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+    const warmStorage = await WarmStorageService.create(
+      provider,
+      warmStorageAddress,
+      overrideMulticallAddress,
+      warmStorageViewAddress
+    )
 
     // Variables to track what was setup
     let providerId = null
