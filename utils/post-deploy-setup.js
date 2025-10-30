@@ -93,11 +93,11 @@
  */
 
 import { ethers } from 'ethers'
-import { PaymentsService } from '@filoz/synapse-sdk/payments'
-import { SPRegistryService } from '@filoz/synapse-sdk/sp-registry'
-import { WarmStorageService } from '@filoz/synapse-sdk/warm-storage'
-import { CONTRACT_ADDRESSES } from '@filoz/synapse-sdk/dist/src/utils/constants.js'
-import { RPC_URLS, TIME_CONSTANTS, TOKENS } from '@filoz/synapse-sdk/dist/src/utils/index.js'
+import { PaymentsService } from '../packages/synapse-sdk/dist/src/payments/index.js'
+import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/index.js'
+import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/index.js'
+import { CONTRACT_ADDRESSES } from '../packages/synapse-sdk/dist/src/utils/constants.js'
+import { RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/dist/src/utils/index.js'
 
 // Constants for payment approvals
 const RATE_ALLOWANCE_PER_EPOCH = ethers.parseUnits('0.1', 18) // 0.1 USDFC per epoch
