@@ -342,7 +342,8 @@ async function setupClient(clientSigner, provider, warmStorage, warmStorageAddre
 
   // USDFC token address on calibration network
   // This is a standard token address across all deployments
-  const usdfcAddress = '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
+  const usdfcAddress =
+    process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
   log(`USDFC token address: ${usdfcAddress}`)
 
   // Create PaymentsService
