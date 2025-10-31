@@ -27,6 +27,31 @@ const PDP_DEFAULTS = {
   // PAYMENT_TOKEN_ADDRESS resolved dynamically from CONTRACT_ADDRESSES.USDFC[network]
 }
 
+function toBigInt(value) {
+  if (typeof value === 'bigint') {
+    return value
+  }
+  return BigInt(value)
+}
+
+function encodePDPOffering(offering) {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder()
+  return abiCoder.encode(
+    ['tuple(string,uint256,uint256,bool,bool,uint256,uint256,string,address)'],
+    [[
+      offering.serviceURL,
+      toBigInt(offering.minPieceSizeInBytes),
+      toBigInt(offering.maxPieceSizeInBytes),
+      offering.ipniPiece,
+      offering.ipniIpfs,
+      toBigInt(offering.storagePricePerTibPerMonth),
+      toBigInt(offering.minProvingPeriodInEpochs),
+      offering.location,
+      offering.paymentTokenAddress,
+    ]]
+  )
+}
+
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -443,8 +468,7 @@ async function handleRegister(provider, signer, options) {
     const network = await getFilecoinNetworkType(provider)
     const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
 
-    // Encode PDP offering
-    const encodedOffering = await registry.encodePDPOffering({
+    const encodedOffering = encodePDPOffering({
       serviceURL: options.http,
       minPieceSizeInBytes: PDP_DEFAULTS.MIN_PIECE_SIZE,
       maxPieceSizeInBytes: PDP_DEFAULTS.MAX_PIECE_SIZE,
