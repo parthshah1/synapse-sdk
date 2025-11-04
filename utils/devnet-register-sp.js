@@ -59,8 +59,9 @@ async function main() {
   console.log(`Registry: ${spRegistryAddress}`)
   console.log(`WarmStorage: ${warmStorageAddress}`)
 
-  // Create contract instances
-  const spRegistry = new ethers.Contract(spRegistryAddress, SP_REGISTRY_ABI, spSigner)
+  // Create contract instances - try using deployer as the caller for registration
+  const spRegistry = new ethers.Contract(spRegistryAddress, SP_REGISTRY_ABI, deployerSigner)
+  const spRegistryWithSP = new ethers.Contract(spRegistryAddress, SP_REGISTRY_ABI, spSigner)
   const warmStorage = new ethers.Contract(warmStorageAddress, WARM_STORAGE_ABI, deployerSigner)
 
   try {
@@ -132,6 +133,7 @@ async function main() {
       }
 
       console.log(`Calling registerProvider with:`)
+      console.log(`  caller: ${deployerAddress} (deployer)`)
       console.log(`  payee: ${spAddress}`)
       console.log(`  name: "Devnet Test Provider"`)
       console.log(`  description: "Test provider for devnet development"`)
@@ -140,28 +142,53 @@ async function main() {
       console.log(`  capabilityValues: []`)
       console.log(`  value: ${ethers.formatEther(registrationFee)} FIL`)
 
-      // Try the simpler signature first
+      // Try with deployer as caller first
       let registerTx
       try {
-        console.log(`Trying simple registerProvider signature...`)
+        console.log(`Trying with deployer as caller (simple signature)...`)
         registerTx = await spRegistry['registerProvider(address,string,string)'](
           spAddress, // payee
           'Devnet Test Provider', // name
           'Test provider for devnet development', // description
           { value: registrationFee }
         )
-      } catch (simpleError) {
-        console.log(`Simple signature failed: ${simpleError.message}`)
-        console.log(`Trying full signature...`)
-        registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
-          spAddress, // payee
-          'Devnet Test Provider', // name
-          'Test provider for devnet development', // description
-          0, // ProductType.PDP
-          [], // capability keys
-          [], // capability values
-          { value: registrationFee }
-        )
+      } catch (deployerSimpleError) {
+        console.log(`Deployer simple signature failed: ${deployerSimpleError.message}`)
+        try {
+          console.log(`Trying with deployer as caller (full signature)...`)
+          registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
+            spAddress, // payee
+            'Devnet Test Provider', // name
+            'Test provider for devnet development', // description
+            0, // ProductType.PDP
+            [], // capability keys
+            [], // capability values
+            { value: registrationFee }
+          )
+        } catch (deployerFullError) {
+          console.log(`Deployer full signature failed: ${deployerFullError.message}`)
+          console.log(`Trying with SP as caller (simple signature)...`)
+          try {
+            registerTx = await spRegistryWithSP['registerProvider(address,string,string)'](
+              spAddress, // payee
+              'Devnet Test Provider', // name
+              'Test provider for devnet development', // description
+              { value: registrationFee }
+            )
+          } catch (spSimpleError) {
+            console.log(`SP simple signature failed: ${spSimpleError.message}`)
+            console.log(`Trying with SP as caller (full signature)...`)
+            registerTx = await spRegistryWithSP['registerProvider(address,string,string,uint8,string[],bytes[])'](
+              spAddress, // payee
+              'Devnet Test Provider', // name
+              'Test provider for devnet development', // description
+              0, // ProductType.PDP
+              [], // capability keys
+              [], // capability values
+              { value: registrationFee }
+            )
+          }
+        }
       }
 
       console.log(`Transaction sent: ${registerTx.hash}`)
