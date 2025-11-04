@@ -181,46 +181,19 @@ async function main() {
           // Let's try different approaches to resolve the 0xdd978c4f error
           
           try {
-            console.log(`Trying signature 3a: registerProvider with required PDP capabilities...`)
+            console.log(`Trying signature 3a: registerProvider without any product first...`)
             
-            // For PDP (productType = 0), provide all the capabilities that mainnet/calibration expects
-            // Based on post-deploy-setup.js, these are the PDP offering fields
-            const pdpCapabilityKeys = [
-              'serviceURL',
-              'minPieceSizeInBytes', 
-              'maxPieceSizeInBytes',
-              'ipniPiece',
-              'ipniIpfs', 
-              'storagePricePerTibPerMonth',
-              'minProvingPeriodInEpochs',
-              'location',
-              'paymentTokenAddress'
-            ]
-            const pdpCapabilityValues = [
-              ethers.hexlify(ethers.toUtf8Bytes('http://localhost:4702')), // serviceURL
-              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [127]), // minPieceSizeInBytes
-              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [34091302912]), // maxPieceSizeInBytes (~32GiB)
-              ethers.AbiCoder.defaultAbiCoder().encode(['bool'], [false]), // ipniPiece
-              ethers.AbiCoder.defaultAbiCoder().encode(['bool'], [false]), // ipniIpfs
-              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [5000000000000000000n]), // 5 USDFC/TiB/month
-              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [2880]), // minProvingPeriodInEpochs (30 days)
-              ethers.hexlify(ethers.toUtf8Bytes('C=US;ST=California;L=DevNet')), // location (non-empty)
-              ethers.AbiCoder.defaultAbiCoder().encode(['address'], [process.env.USDFC_ADDRESS || ethers.ZeroAddress]) // paymentTokenAddress
-            ]
-            
-            console.log(`PDP capabilities:`)
-            console.log(`  keys: ${JSON.stringify(pdpCapabilityKeys)}`)
-            console.log(`  serviceURL: http://localhost:4702`)
-            console.log(`  minPieceSizeInBytes: 127`)
-            console.log(`  maxPieceSizeInBytes: 34091302912`)
+            // Maybe devnet requires registering without a product first, then adding products separately
+            // This would explain why InsufficientCapabilitiesForProduct is thrown - maybe no capabilities are sufficient for registration
+            console.log(`Registering without product (productType might be ignored)...`)
             
             registerTx = await spRegistry.registerProvider(
               spAddress, // payee
               'Devnet Test Provider', // name
               'Test provider for devnet development', // description
-              0, // ProductType.PDP
-              pdpCapabilityKeys, // PDP capability keys
-              pdpCapabilityValues, // PDP capability values
+              255, // Try an invalid/ignored productType to see if it's ignored
+              [], // empty capability keys
+              [], // empty capability values
               { value: registrationFee }
             )
           } catch (error3a) {
