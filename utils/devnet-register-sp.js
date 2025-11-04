@@ -8,24 +8,21 @@
 import { ethers } from 'ethers'
 
 // Simple ABI for the functions we need
+// Use the actual ABI from your devnet contract
 const SP_REGISTRY_ABI = [
-  // Try multiple possible signatures for your devnet contract
   'function registerProvider(address payee, string name, string description, uint8 productType, string[] capabilityKeys, bytes[] capabilityValues) payable returns (uint256)',
-  'function registerProvider(address payee, string name, string description) payable returns (uint256)',
-  'function registerProvider(string name, string description) payable returns (uint256)',
   'function addProduct(uint8 productType, string[] capabilityKeys, bytes[] capabilityValues)',
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
+  'function getProviderIdByAddress(address) view returns (uint256)',
   'function isRegisteredProvider(address) view returns (bool)',
   'function getProviderCount() view returns (uint256)',
-  'function getProvider(uint256 providerId) view returns (tuple(uint256 id, address serviceProvider, address payee, string name, string description, bool active))',
-  // Common custom errors - let's try to decode 0xdd978c4f
-  'error ProviderAlreadyRegistered(address provider)',
-  'error InvalidPaymentAmount(uint256 expected, uint256 actual)', 
-  'error InvalidProductType(uint8 productType)',
-  'error InvalidProviderId(uint256 providerId)', // This might be 0xdd978c4f
-  'error Unauthorized(address caller)',
-  'error InsufficientPayment(uint256 required, uint256 provided)',
+  'function getProvider(uint256 providerId) view returns (tuple(uint256 providerId, tuple(address serviceProvider, address payee, string name, string description, bool isActive) info))',
+  // Custom errors from your devnet contract
+  'error InsufficientCapabilitiesForProduct(uint8 productType)',
+  'error OwnableUnauthorizedAccount(address account)',
+  'error InvalidInitialization()',
+  'error NotInitializing()',
 ]
 
 const WARM_STORAGE_ABI = [
@@ -168,14 +165,24 @@ async function main() {
         } catch (error2) {
           console.log(`Signature 2 failed: ${error2.message}`)
           
-          console.log(`Trying signature 3: registerProvider(address, string, string, uint8, string[], bytes[])...`)
-          registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
+          console.log(`Trying signature 3: registerProvider with PDP capabilities...`)
+          
+          // The error 0xdd978c4f is likely InsufficientCapabilitiesForProduct
+          // PDP product type probably requires serviceURL capability
+          const capabilityKeys = ['serviceURL']
+          const capabilityValues = [ethers.hexlify(ethers.toUtf8Bytes('http://localhost:4702'))]
+          
+          console.log(`Adding capabilities:`)
+          console.log(`  keys: ${JSON.stringify(capabilityKeys)}`)
+          console.log(`  values: ${JSON.stringify(capabilityValues.map(v => ethers.toUtf8String(v)))}`)
+          
+          registerTx = await spRegistry.registerProvider(
             spAddress, // payee
             'Devnet Test Provider', // name
             'Test provider for devnet development', // description
             0, // ProductType.PDP
-            [], // capability keys
-            [], // capability values
+            capabilityKeys, // capability keys
+            capabilityValues, // capability values as bytes
             { value: registrationFee }
           )
         }
