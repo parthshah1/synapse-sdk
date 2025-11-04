@@ -9,8 +9,10 @@ import { ethers } from 'ethers'
 
 // Simple ABI for the functions we need
 const SP_REGISTRY_ABI = [
-  // The actual signature your devnet contract expects (no encodedOffering parameter)
+  // Try multiple possible signatures for your devnet contract
   'function registerProvider(address payee, string name, string description, uint8 productType, string[] capabilityKeys, bytes[] capabilityValues) payable returns (uint256)',
+  'function registerProvider(address payee, string name, string description) payable returns (uint256)',
+  'function registerProvider(string name, string description) payable returns (uint256)',
   'function addProduct(uint8 productType, string[] capabilityKeys, bytes[] capabilityValues)',
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
@@ -23,6 +25,7 @@ const SP_REGISTRY_ABI = [
   'error InvalidProductType(uint8 productType)',
   'error InvalidProviderId(uint256 providerId)', // This might be 0xdd978c4f
   'error Unauthorized(address caller)',
+  'error InsufficientPayment(uint256 required, uint256 provided)',
 ]
 
 const WARM_STORAGE_ABI = [
@@ -141,17 +144,42 @@ async function main() {
       console.log(`  capabilityValues: []`)
       console.log(`  value: ${ethers.formatEther(registrationFee)} FIL`)
 
-      // Use the correct signature for your devnet contract
-      console.log(`Trying with deployer as caller...`)
-      const registerTx = await spRegistry.registerProvider(
-        spAddress, // payee
-        'Devnet Test Provider', // name
-        'Test provider for devnet development', // description
-        0, // ProductType.PDP
-        [], // capability keys
-        [], // capability values
-        { value: registrationFee }
-      )
+      // Try different signatures to find the one your devnet contract expects
+      let registerTx
+      
+      try {
+        console.log(`Trying signature 1: registerProvider(string, string)...`)
+        registerTx = await spRegistry['registerProvider(string,string)'](
+          'Devnet Test Provider', // name
+          'Test provider for devnet development', // description
+          { value: registrationFee }
+        )
+      } catch (error1) {
+        console.log(`Signature 1 failed: ${error1.message}`)
+        
+        try {
+          console.log(`Trying signature 2: registerProvider(address, string, string)...`)
+          registerTx = await spRegistry['registerProvider(address,string,string)'](
+            spAddress, // payee
+            'Devnet Test Provider', // name
+            'Test provider for devnet development', // description
+            { value: registrationFee }
+          )
+        } catch (error2) {
+          console.log(`Signature 2 failed: ${error2.message}`)
+          
+          console.log(`Trying signature 3: registerProvider(address, string, string, uint8, string[], bytes[])...`)
+          registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
+            spAddress, // payee
+            'Devnet Test Provider', // name
+            'Test provider for devnet development', // description
+            0, // ProductType.PDP
+            [], // capability keys
+            [], // capability values
+            { value: registrationFee }
+          )
+        }
+      }
 
       console.log(`Transaction sent: ${registerTx.hash}`)
       const receipt = await registerTx.wait()
