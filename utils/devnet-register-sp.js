@@ -16,10 +16,14 @@ const SP_REGISTRY_ABI = [
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
   'function isRegisteredProvider(address) view returns (bool)',
-  // Common custom errors
+  'function getProviderCount() view returns (uint256)',
+  'function getProvider(uint256 providerId) view returns (tuple(uint256 id, address serviceProvider, address payee, string name, string description, bool active))',
+  // Common custom errors - let's try to decode 0xdd978c4f
   'error ProviderAlreadyRegistered(address provider)',
-  'error InvalidPaymentAmount(uint256 expected, uint256 actual)',
+  'error InvalidPaymentAmount(uint256 expected, uint256 actual)', 
   'error InvalidProductType(uint8 productType)',
+  'error InvalidProviderId(uint256 providerId)', // This might be 0xdd978c4f
+  'error Unauthorized(address caller)',
 ]
 
 const WARM_STORAGE_ABI = [
@@ -88,6 +92,14 @@ async function main() {
         process.exit(1)
       }
 
+      // Debug: Check contract state
+      try {
+        const providerCount = await spRegistry.getProviderCount()
+        console.log(`Total providers in registry: ${providerCount}`)
+      } catch (error) {
+        console.log(`Could not get provider count: ${error.message}`)
+      }
+
       // Double-check if already registered using different method
       try {
         const isRegistered = await spRegistry.isRegisteredProvider(spAddress)
@@ -95,8 +107,28 @@ async function main() {
           console.log(`❌ Provider is already registered according to isRegisteredProvider()`)
           process.exit(1)
         }
+        console.log(`isRegisteredProvider() returned: ${isRegistered}`)
       } catch (error) {
-        console.log(`Note: isRegisteredProvider() not available, continuing...`)
+        console.log(`Note: isRegisteredProvider() not available: ${error.message}`)
+      }
+
+      // Check if the address has any existing provider ID (even if 0)
+      try {
+        const existingId = await spRegistry.addressToProviderId(spAddress)
+        console.log(`addressToProviderId() returned: ${existingId}`)
+        if (existingId > 0) {
+          console.log(`❌ Address already has provider ID: ${existingId}`)
+          // Let's check if this provider exists
+          try {
+            const provider = await spRegistry.getProvider(existingId)
+            console.log(`Existing provider:`, provider)
+          } catch (e) {
+            console.log(`Could not get provider details: ${e.message}`)
+          }
+          process.exit(1)
+        }
+      } catch (error) {
+        console.log(`addressToProviderId() error: ${error.message}`)
       }
 
       console.log(`Calling registerProvider with:`)
