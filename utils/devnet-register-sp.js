@@ -18,6 +18,8 @@ const SP_REGISTRY_ABI = [
   'function isRegisteredProvider(address) view returns (bool)',
   'function getProviderCount() view returns (uint256)',
   'function getProvider(uint256 providerId) view returns (tuple(uint256 providerId, tuple(address serviceProvider, address payee, string name, string description, bool isActive) info))',
+  'function initialize()',
+  'function owner() view returns (address)',
   // Custom errors from your devnet contract
   'error InsufficientCapabilitiesForProduct(uint8 productType)',
   'error OwnableUnauthorizedAccount(address account)',
@@ -92,12 +94,23 @@ async function main() {
         process.exit(1)
       }
 
-      // Debug: Check contract state
+      // Debug: Check contract state and initialization
       try {
         const providerCount = await spRegistry.getProviderCount()
         console.log(`Total providers in registry: ${providerCount}`)
       } catch (error) {
         console.log(`Could not get provider count: ${error.message}`)
+      }
+
+      // Check if contract is initialized by checking if it has an owner
+      try {
+        const owner = await spRegistry.owner()
+        console.log(`Contract owner: ${owner}`)
+        if (owner === ethers.ZeroAddress) {
+          console.log(`⚠️  Contract might not be initialized (owner is zero address)`)
+        }
+      } catch (error) {
+        console.log(`Could not get contract owner: ${error.message}`)
       }
 
       // Double-check if already registered using different method
@@ -165,26 +178,48 @@ async function main() {
         } catch (error2) {
           console.log(`Signature 2 failed: ${error2.message}`)
           
-          console.log(`Trying signature 3: registerProvider with PDP capabilities...`)
+          // Let's try different approaches to resolve the 0xdd978c4f error
           
-          // The error 0xdd978c4f is likely InsufficientCapabilitiesForProduct
-          // PDP product type probably requires serviceURL capability
-          const capabilityKeys = ['serviceURL']
-          const capabilityValues = [ethers.hexlify(ethers.toUtf8Bytes('http://localhost:4702'))]
-          
-          console.log(`Adding capabilities:`)
-          console.log(`  keys: ${JSON.stringify(capabilityKeys)}`)
-          console.log(`  values: ${JSON.stringify(capabilityValues.map(v => ethers.toUtf8String(v)))}`)
-          
-          registerTx = await spRegistry.registerProvider(
-            spAddress, // payee
-            'Devnet Test Provider', // name
-            'Test provider for devnet development', // description
-            0, // ProductType.PDP
-            capabilityKeys, // capability keys
-            capabilityValues, // capability values as bytes
-            { value: registrationFee }
-          )
+          try {
+            console.log(`Trying signature 3a: registerProvider without product (empty capabilities)...`)
+            registerTx = await spRegistry.registerProvider(
+              spAddress, // payee
+              'Devnet Test Provider', // name
+              'Test provider for devnet development', // description
+              0, // ProductType.PDP
+              [], // empty capability keys
+              [], // empty capability values
+              { value: registrationFee }
+            )
+          } catch (error3a) {
+            console.log(`Signature 3a failed: ${error3a.message}`)
+            
+            try {
+              console.log(`Trying signature 3b: registerProvider with different productType (1)...`)
+              registerTx = await spRegistry.registerProvider(
+                spAddress, // payee
+                'Devnet Test Provider', // name
+                'Test provider for devnet development', // description
+                1, // Try productType = 1
+                [], // empty capability keys
+                [], // empty capability values
+                { value: registrationFee }
+              )
+            } catch (error3b) {
+              console.log(`Signature 3b failed: ${error3b.message}`)
+              
+              console.log(`Trying signature 3c: SP as caller instead of deployer...`)
+              registerTx = await spRegistryWithSP.registerProvider(
+                spAddress, // payee
+                'Devnet Test Provider', // name
+                'Test provider for devnet development', // description
+                0, // ProductType.PDP
+                [], // empty capability keys
+                [], // empty capability values
+                { value: registrationFee }
+              )
+            }
+          }
         }
       }
 
