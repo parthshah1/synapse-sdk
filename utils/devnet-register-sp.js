@@ -204,7 +204,7 @@ async function main() {
               ethers.AbiCoder.defaultAbiCoder().encode(['bool'], [false]), // ipniIpfs
               ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [5000000000000000000n]), // 5 USDFC/TiB/month
               ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [2880]), // minProvingPeriodInEpochs (30 days)
-              ethers.hexlify(ethers.toUtf8Bytes('')), // location (empty)
+              ethers.hexlify(ethers.toUtf8Bytes('C=US;ST=California;L=DevNet')), // location (non-empty)
               ethers.AbiCoder.defaultAbiCoder().encode(['address'], [process.env.USDFC_ADDRESS || ethers.ZeroAddress]) // paymentTokenAddress
             ]
             
