@@ -9,10 +9,17 @@ import { ethers } from 'ethers'
 
 // Simple ABI for the functions we need
 const SP_REGISTRY_ABI = [
+  // Try different possible signatures
   'function registerProvider(address payee, string name, string description, uint8 productType, string[] capabilityKeys, bytes[] capabilityValues) payable returns (uint256)',
+  'function registerProvider(address payee, string name, string description) payable returns (uint256)',
   'function addProduct(uint8 productType, string[] capabilityKeys, bytes[] capabilityValues)',
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
+  'function isRegisteredProvider(address) view returns (bool)',
+  // Common custom errors
+  'error ProviderAlreadyRegistered(address provider)',
+  'error InvalidPaymentAmount(uint256 expected, uint256 actual)',
+  'error InvalidProductType(uint8 productType)',
 ]
 
 const WARM_STORAGE_ABI = [
@@ -81,15 +88,49 @@ async function main() {
         process.exit(1)
       }
 
-      const registerTx = await spRegistry.registerProvider(
-        spAddress, // payee
-        'Devnet Test Provider', // name
-        'Test provider for devnet development', // description
-        0, // ProductType.PDP
-        [], // capability keys
-        [], // capability values
-        { value: registrationFee }
-      )
+      // Double-check if already registered using different method
+      try {
+        const isRegistered = await spRegistry.isRegisteredProvider(spAddress)
+        if (isRegistered) {
+          console.log(`❌ Provider is already registered according to isRegisteredProvider()`)
+          process.exit(1)
+        }
+      } catch (error) {
+        console.log(`Note: isRegisteredProvider() not available, continuing...`)
+      }
+
+      console.log(`Calling registerProvider with:`)
+      console.log(`  payee: ${spAddress}`)
+      console.log(`  name: "Devnet Test Provider"`)
+      console.log(`  description: "Test provider for devnet development"`)
+      console.log(`  productType: 0`)
+      console.log(`  capabilityKeys: []`)
+      console.log(`  capabilityValues: []`)
+      console.log(`  value: ${ethers.formatEther(registrationFee)} FIL`)
+
+      // Try the simpler signature first
+      let registerTx
+      try {
+        console.log(`Trying simple registerProvider signature...`)
+        registerTx = await spRegistry['registerProvider(address,string,string)'](
+          spAddress, // payee
+          'Devnet Test Provider', // name
+          'Test provider for devnet development', // description
+          { value: registrationFee }
+        )
+      } catch (simpleError) {
+        console.log(`Simple signature failed: ${simpleError.message}`)
+        console.log(`Trying full signature...`)
+        registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
+          spAddress, // payee
+          'Devnet Test Provider', // name
+          'Test provider for devnet development', // description
+          0, // ProductType.PDP
+          [], // capability keys
+          [], // capability values
+          { value: registrationFee }
+        )
+      }
 
       console.log(`Transaction sent: ${registerTx.hash}`)
       const receipt = await registerTx.wait()
