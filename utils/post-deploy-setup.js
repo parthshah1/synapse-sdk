@@ -229,10 +229,35 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       storagePricePerTibPerMonth,
       minProvingPeriodInEpochs: minProvingPeriod,
       location,
-      paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+      paymentTokenAddress: process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || ethers.ZeroAddress,
     }
 
-    const encodedOffering = await spRegistry.encodePDPOffering(pdpOffering)
+    // For devnet, manually encode the PDP offering since the contract helper may not be available
+    let encodedOffering
+    try {
+      encodedOffering = await spRegistry.encodePDPOffering(pdpOffering)
+    } catch (error) {
+      if (error.message.includes('encodePDPOffering is not a function')) {
+        // Manually encode for devnet
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder()
+        encodedOffering = abiCoder.encode(
+          ['tuple(string,uint256,uint256,bool,bool,uint256,uint256,string,address)'],
+          [[
+            pdpOffering.serviceURL,
+            pdpOffering.minPieceSizeInBytes,
+            pdpOffering.maxPieceSizeInBytes,
+            pdpOffering.ipniPiece,
+            pdpOffering.ipniIpfs,
+            pdpOffering.storagePricePerTibPerMonth,
+            pdpOffering.minProvingPeriodInEpochs,
+            pdpOffering.location,
+            pdpOffering.paymentTokenAddress,
+          ]]
+        )
+      } else {
+        throw error
+      }
+    }
 
     // Register with PDP product included
     // Use the SP's address as both serviceProvider (msg.sender) and payee
@@ -287,7 +312,7 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
           storagePricePerTibPerMonth,
           minProvingPeriodInEpochs: minProvingPeriod,
           location,
-          paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+          paymentTokenAddress: process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || ethers.ZeroAddress,
         }
 
         const capabilities = location ? { location } : {}
@@ -308,7 +333,7 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       storagePricePerTibPerMonth,
       minProvingPeriodInEpochs: minProvingPeriod,
       location,
-      paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+      paymentTokenAddress: process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || ethers.ZeroAddress,
     }
 
     const capabilities = location ? { location } : {}
@@ -336,14 +361,13 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
 }
 
 // Setup client function
-async function setupClient(clientSigner, provider, warmStorage, warmStorageAddress) {
+async function setupClient(clientSigner, provider, warmStorage, warmStorageAddress, network) {
   // === Set up client payment approvals ===
   log('\n💰 Client Payment Setup')
 
-  // USDFC token address on calibration network
-  // This is a standard token address across all deployments
+  // USDFC token address - prioritize environment variable for devnet
   const usdfcAddress =
-    process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
+    process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC?.[network] || ethers.ZeroAddress
   log(`USDFC token address: ${usdfcAddress}`)
 
   // Create PaymentsService
@@ -555,7 +579,7 @@ async function main() {
 
       log(`\nClient address: ${clientAddress}`)
 
-      await setupClient(clientSigner, provider, warmStorage, warmStorageAddress)
+      await setupClient(clientSigner, provider, warmStorage, warmStorageAddress, network)
     }
 
     // === Summary ===
