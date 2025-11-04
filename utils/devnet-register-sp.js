@@ -59,13 +59,16 @@ async function main() {
       providerId = await spRegistry.addressToProviderId(spAddress)
       if (providerId > 0) {
         console.log(`✅ Provider already registered with ID: ${providerId}`)
+      } else {
+        console.log(`Provider not yet registered (ID: ${providerId})`)
       }
     } catch (error) {
+      console.log(`Error checking registration, assuming not registered: ${error.message}`)
       providerId = 0
     }
 
     // Step 2: Register if not already registered
-    if (providerId === 0) {
+    if (providerId === 0 || providerId === 0n) {
       console.log(`\n📋 Step 1: Registering Provider`)
       
       const registrationFee = await spRegistry.REGISTRATION_FEE()
