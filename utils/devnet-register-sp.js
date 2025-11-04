@@ -7,20 +7,19 @@
 
 import { ethers } from 'ethers'
 
-// Simple ABI for the functions we need
-// Use the actual ABI from your devnet contract
+// ABI matching your exact ServiceProviderRegistry contract
 const SP_REGISTRY_ABI = [
-  'function registerProvider(address payee, string name, string description, uint8 productType, string[] capabilityKeys, bytes[] capabilityValues) payable returns (uint256)',
-  'function addProduct(uint8 productType, string[] capabilityKeys, bytes[] capabilityValues)',
+  'function registerProvider(address payee, string calldata name, string calldata description, uint8 productType, string[] calldata capabilityKeys, bytes[] calldata capabilityValues) external payable returns (uint256)',
+  'function addProduct(uint8 productType, string[] calldata capabilityKeys, bytes[] calldata capabilityValues) external',
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
   'function getProviderIdByAddress(address) view returns (uint256)',
   'function isRegisteredProvider(address) view returns (bool)',
   'function getProviderCount() view returns (uint256)',
   'function getProvider(uint256 providerId) view returns (tuple(uint256 providerId, tuple(address serviceProvider, address payee, string name, string description, bool isActive) info))',
-  'function initialize()',
+  'function initialize() external',
   'function owner() view returns (address)',
-  // Custom errors from your devnet contract
+  // Custom errors from your contract
   'error InsufficientCapabilitiesForProduct(uint8 productType)',
   'error OwnableUnauthorizedAccount(address account)',
   'error InvalidInitialization()',
@@ -181,19 +180,50 @@ async function main() {
           // Let's try different approaches to resolve the 0xdd978c4f error
           
           try {
-            console.log(`Trying signature 3a: registerProvider without any product first...`)
+            console.log(`Trying signature 3a: registerProvider with ALL required PDP capabilities...`)
             
-            // Maybe devnet requires registering without a product first, then adding products separately
-            // This would explain why InsufficientCapabilitiesForProduct is thrown - maybe no capabilities are sufficient for registration
-            console.log(`Registering without product (productType might be ignored)...`)
+            // Based on the actual contract code, these are the REQUIRED PDP keys validated by the Bloom filter:
+            // - serviceURL, minPieceSizeInBytes, maxPieceSizeInBytes, storagePricePerTibPerDay
+            // - minProvingPeriodInEpochs, location, paymentTokenAddress
+            const pdpCapabilityKeys = [
+              'serviceURL',
+              'minPieceSizeInBytes', 
+              'maxPieceSizeInBytes',
+              'storagePricePerTibPerDay',  // Note: per DAY, not per MONTH like mainnet
+              'minProvingPeriodInEpochs',
+              'location',
+              'paymentTokenAddress'
+            ]
+            
+            // All values must be non-empty bytes according to contract validation
+            const pdpCapabilityValues = [
+              ethers.hexlify(ethers.toUtf8Bytes('http://localhost:4702')), // serviceURL
+              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [127]), // minPieceSizeInBytes (127 bytes minimum)
+              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [34091302912]), // maxPieceSizeInBytes (~32GiB)
+              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [137000000000000000n]), // storagePricePerTibPerDay (~0.137 USDFC/TiB/day = 50 USDFC/TiB/year)
+              ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [2880]), // minProvingPeriodInEpochs (30 days)
+              ethers.hexlify(ethers.toUtf8Bytes('US-West-DevNet')), // location (non-empty string)
+              ethers.AbiCoder.defaultAbiCoder().encode(['address'], [process.env.USDFC_ADDRESS || ethers.ZeroAddress]) // paymentTokenAddress
+            ]
+            
+            console.log(`Required PDP capabilities for Bloom filter validation:`)
+            pdpCapabilityKeys.forEach((key, i) => {
+              if (key === 'serviceURL' || key === 'location') {
+                // These are hex-encoded UTF-8 strings
+                const decoded = ethers.toUtf8String(pdpCapabilityValues[i])
+                console.log(`  ${key}: ${decoded}`)
+              } else {
+                console.log(`  ${key}: <encoded bytes>`)
+              }
+            })
             
             registerTx = await spRegistry.registerProvider(
               spAddress, // payee
               'Devnet Test Provider', // name
               'Test provider for devnet development', // description
-              255, // Try an invalid/ignored productType to see if it's ignored
-              [], // empty capability keys
-              [], // empty capability values
+              0, // ProductType.PDP (only supported type)
+              pdpCapabilityKeys, // All required PDP capability keys
+              pdpCapabilityValues, // All required PDP capability values (non-empty)
               { value: registrationFee }
             )
           } catch (error3a) {
