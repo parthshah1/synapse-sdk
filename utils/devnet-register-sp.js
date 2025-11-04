@@ -9,9 +9,8 @@ import { ethers } from 'ethers'
 
 // Simple ABI for the functions we need
 const SP_REGISTRY_ABI = [
-  // Try different possible signatures
+  // The actual signature your devnet contract expects (no encodedOffering parameter)
   'function registerProvider(address payee, string name, string description, uint8 productType, string[] capabilityKeys, bytes[] capabilityValues) payable returns (uint256)',
-  'function registerProvider(address payee, string name, string description) payable returns (uint256)',
   'function addProduct(uint8 productType, string[] capabilityKeys, bytes[] capabilityValues)',
   'function REGISTRATION_FEE() view returns (uint256)',
   'function addressToProviderId(address) view returns (uint256)',
@@ -142,54 +141,17 @@ async function main() {
       console.log(`  capabilityValues: []`)
       console.log(`  value: ${ethers.formatEther(registrationFee)} FIL`)
 
-      // Try with deployer as caller first
-      let registerTx
-      try {
-        console.log(`Trying with deployer as caller (simple signature)...`)
-        registerTx = await spRegistry['registerProvider(address,string,string)'](
-          spAddress, // payee
-          'Devnet Test Provider', // name
-          'Test provider for devnet development', // description
-          { value: registrationFee }
-        )
-      } catch (deployerSimpleError) {
-        console.log(`Deployer simple signature failed: ${deployerSimpleError.message}`)
-        try {
-          console.log(`Trying with deployer as caller (full signature)...`)
-          registerTx = await spRegistry['registerProvider(address,string,string,uint8,string[],bytes[])'](
-            spAddress, // payee
-            'Devnet Test Provider', // name
-            'Test provider for devnet development', // description
-            0, // ProductType.PDP
-            [], // capability keys
-            [], // capability values
-            { value: registrationFee }
-          )
-        } catch (deployerFullError) {
-          console.log(`Deployer full signature failed: ${deployerFullError.message}`)
-          console.log(`Trying with SP as caller (simple signature)...`)
-          try {
-            registerTx = await spRegistryWithSP['registerProvider(address,string,string)'](
-              spAddress, // payee
-              'Devnet Test Provider', // name
-              'Test provider for devnet development', // description
-              { value: registrationFee }
-            )
-          } catch (spSimpleError) {
-            console.log(`SP simple signature failed: ${spSimpleError.message}`)
-            console.log(`Trying with SP as caller (full signature)...`)
-            registerTx = await spRegistryWithSP['registerProvider(address,string,string,uint8,string[],bytes[])'](
-              spAddress, // payee
-              'Devnet Test Provider', // name
-              'Test provider for devnet development', // description
-              0, // ProductType.PDP
-              [], // capability keys
-              [], // capability values
-              { value: registrationFee }
-            )
-          }
-        }
-      }
+      // Use the correct signature for your devnet contract
+      console.log(`Trying with deployer as caller...`)
+      const registerTx = await spRegistry.registerProvider(
+        spAddress, // payee
+        'Devnet Test Provider', // name
+        'Test provider for devnet development', // description
+        0, // ProductType.PDP
+        [], // capability keys
+        [], // capability values
+        { value: registrationFee }
+      )
 
       console.log(`Transaction sent: ${registerTx.hash}`)
       const receipt = await registerTx.wait()
