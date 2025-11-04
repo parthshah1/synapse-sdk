@@ -90,10 +90,15 @@ async function getRegistryService(provider, options) {
     return new SPRegistryService(provider, options.registry)
   }
 
-  // Priority 2: Discover from warm storage
+  // Priority 2: Environment variable
+  if (!options.warm && process.env.WARM_STORAGE_CONTRACT_ADDRESS) {
+    options.warm = process.env.WARM_STORAGE_CONTRACT_ADDRESS
+  }
+
+  // Priority 3: Discover from warm storage
   let warmStorageAddress = options.warm
 
-  // Priority 3: Use default warm storage
+  // Priority 4: Use default warm storage
   if (warmStorageAddress) {
     console.log(`Using WarmStorage: ${warmStorageAddress}`)
   } else {
@@ -466,7 +471,7 @@ async function handleRegister(provider, signer, options) {
 
     // Get network-specific USDFC address
     const network = await getFilecoinNetworkType(provider)
-    const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+    const usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network] || ethers.ZeroAddress
 
     const encodedOffering = encodePDPOffering({
       serviceURL: options.http,
@@ -616,7 +621,7 @@ async function handlePDPUpdate(registry, signer, options, provider) {
 
   // Get network-specific USDFC address
   const network = await getFilecoinNetworkType(provider)
-  const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+  const usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network] || ethers.ZeroAddress
 
   // Prepare updated PDP offering by merging current values with new ones
   const updatedOffering = {
