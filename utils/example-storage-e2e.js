@@ -28,6 +28,7 @@ import {
   Synapse,
   TIME_CONSTANTS,
 } from '../packages/synapse-sdk/dist/src/index.js'
+import { calculate } from '../packages/synapse-sdk/dist/src/piece/index.js'
 
 // Configuration from environment
 const PRIVATE_KEY = process.env.PRIVATE_KEY
@@ -271,10 +272,18 @@ async function main() {
       if (files.length > 1) {
         pfx = `[File ${index + 1}/${files.length}] `
       }
+      // Calculate PieceCID before upload for debugging
+      const calculatedPieceCid = calculate(file.data)
+      console.log(`  ${pfx}Calculated PieceCID: ${calculatedPieceCid.toString()}`)
+      console.log(`  ${pfx}File size: ${file.data.length} bytes`)
+      console.log(`  ${pfx}Starting upload to Curio...`)
+      
       return storageContext.upload(file.data, {
         onUploadComplete: (pieceCid) => {
-          console.log(`✓ ${pfx}Upload complete! PieceCID: ${pieceCid}`)
-          console.log(`  ${pfx}Polling for piece to be indexed... (this may take up to 5 minutes)`)
+          console.log(`✓ ${pfx}Data upload complete! PieceCID: ${pieceCid}`)
+          console.log(`  ${pfx}Polling for piece to be indexed/processed... (this may take up to 5 minutes)`)
+          console.log(`  ${pfx}Query URL: http://curio:80/pdp/piece?pieceCid=${pieceCid}`)
+          console.log(`  ${pfx}You can manually check: curl "http://curio:80/pdp/piece?pieceCid=${pieceCid}"`)
         },
         onPieceAdded: (transaction) => {
           console.log(`✓ ${pfx}Piece addition transaction: ${transaction.hash}`)
