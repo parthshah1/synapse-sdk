@@ -24,7 +24,7 @@ const PDP_DEFAULTS = {
   IPNI_IPFS: true,
   STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
   MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
-  LOCATION: '',
+  LOCATION: 'C=US;ST=Unknown;L=Unknown', // Default location (DN format) - required by contract, cannot be empty
   // PAYMENT_TOKEN_ADDRESS resolved dynamically from CONTRACT_ADDRESSES.USDFC[network]
 }
 
@@ -546,7 +546,7 @@ async function handleRegister(provider, signer, options) {
       ipniIpfs: PDP_DEFAULTS.IPNI_IPFS,
       storagePricePerTibPerDay: storagePricePerTibPerDay,
       minProvingPeriodInEpochs: BigInt(PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS),
-      location: options.location || PDP_DEFAULTS.LOCATION,
+      location: options.location || PDP_DEFAULTS.LOCATION, // Location is required, cannot be empty
       paymentTokenAddress: (options['payment-token'] || usdfcAddress),
     }
 
