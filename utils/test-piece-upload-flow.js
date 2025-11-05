@@ -26,7 +26,7 @@ async function testUploadFlow() {
   console.log('--- Test Data ---')
   console.log(`Data size: ${testData.length} bytes`)
   console.log(`PieceCID: ${pieceCid.toString()}`)
-  console.log(`PieceCID (hex): ${pieceCid.toString('base16')}`)
+  console.log(`PieceCID bytes (last 32): ${Array.from(pieceCid.bytes.slice(-32)).map(b => b.toString(16).padStart(2, '0')).join('')}`)
   console.log(`First 20 bytes: ${Array.from(testData.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`)
   console.log('')
 
