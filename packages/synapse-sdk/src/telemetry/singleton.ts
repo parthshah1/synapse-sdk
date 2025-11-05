@@ -243,7 +243,7 @@ function wrapFetch(): void {
     }
     const url = input instanceof Request ? new URL(input.url) : new URL(input.toString())
     const method = input instanceof Request ? input.method : init?.method || 'GET'
-    return await sentry.startSpan({ op: 'http.client', name: `${method} ${url}` }, async (span) => {
+    return await sentry.startSpan({ op: 'http.client', name: `${method} ${url}` }, async (span: any) => {
       span.setAttributes({
         'url.path': url.pathname,
         'url.full': url.toString(),

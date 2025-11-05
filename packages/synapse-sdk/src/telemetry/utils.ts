@@ -1,6 +1,3 @@
-import type * as SentryBrowser from '@sentry/browser'
-import type * as SentryNode from '@sentry/node'
-
 /**
  * The telemetry module here and elsewhere needs to know whether we're running in a browser context or not.
  * We determine this once here and export.
@@ -10,8 +7,11 @@ import type * as SentryNode from '@sentry/node'
 export const isBrowser =
   typeof (globalThis as any).window !== 'undefined' && typeof (globalThis as any).document !== 'undefined'
 
-export type SentryBrowserType = typeof SentryBrowser.default
-export type SentryNodeType = typeof SentryNode.default
+// Sentry types - optional dependency, may not be available at compile time
+// When Sentry isn't installed, these types are `any` to allow compilation
+// The actual types are used when Sentry is available at runtime
+export type SentryBrowserType = any // @sentry/browser default export types when available
+export type SentryNodeType = any // @sentry/node default export types when available
 export type SentryType = SentryNodeType | SentryBrowserType
 
 /**
@@ -21,9 +21,9 @@ export type SentryType = SentryNodeType | SentryBrowserType
 export async function getSentry(): Promise<SentryType | null> {
   try {
     if (isBrowser) {
-      return (await import('@sentry/browser')) satisfies typeof SentryBrowser
+      return (await import('@sentry/browser')) as SentryBrowserType
     }
-    return (await import('@sentry/node')) satisfies typeof SentryNode
+    return (await import('@sentry/node')) as SentryNodeType
   } catch {
     // Sentry dependencies not available (optional peer dependencies)
     return null
