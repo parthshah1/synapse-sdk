@@ -38,14 +38,16 @@ import type {
 export class SPRegistryService {
   private readonly _provider: ethers.Provider
   private readonly _registryAddress: string
+  private readonly _multicall3Address: string | null
   private _registryContract: ethers.Contract | null = null
 
   /**
    * Constructor for SPRegistryService
    */
-  constructor(provider: ethers.Provider, registryAddress: string) {
+  constructor(provider: ethers.Provider, registryAddress: string, multicall3Address: string | null = null) {
     this._provider = provider
     this._registryAddress = registryAddress
+    this._multicall3Address = multicall3Address
   }
 
   /**

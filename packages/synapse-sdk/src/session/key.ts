@@ -53,17 +53,20 @@ export class SessionKey {
   private readonly _registry: ethers.Contract
   private readonly _signer: ethers.Signer
   private readonly _owner: ethers.Signer
+  private readonly _multicall3Address: string | null
 
   public constructor(
     provider: ethers.Provider,
     sessionKeyRegistryAddress: string,
     signer: ethers.Signer,
-    owner: ethers.Signer
+    owner: ethers.Signer,
+    multicall3Address: string | null = null
   ) {
     this._provider = provider
     this._registry = new ethers.Contract(sessionKeyRegistryAddress, CONTRACT_ABIS.SESSION_KEY_REGISTRY, owner)
     this._signer = signer
     this._owner = owner
+    this._multicall3Address = multicall3Address
   }
 
   getSigner(): ethers.Signer {

@@ -40,6 +40,7 @@ export class PaymentsService {
   private readonly _paymentsAddress: string
   private readonly _usdfcAddress: string
   private readonly _disableNonceManager: boolean
+  private readonly _multicall3Address: string | null
   // Cached contract instances
   private _usdfcContract: ethers.Contract | null = null
   private _paymentsContract: ethers.Contract | null = null
@@ -60,13 +61,15 @@ export class PaymentsService {
     signer: ethers.Signer,
     paymentsAddress: string,
     usdfcAddress: string,
-    disableNonceManager: boolean
+    disableNonceManager: boolean,
+    multicall3Address: string | null = null
   ) {
     this._provider = provider
     this._signer = signer
     this._paymentsAddress = paymentsAddress
     this._usdfcAddress = usdfcAddress
     this._disableNonceManager = disableNonceManager
+    this._multicall3Address = multicall3Address
   }
 
   /**
