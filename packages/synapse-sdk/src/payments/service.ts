@@ -111,7 +111,15 @@ export class PaymentsService {
     const chainId = CHAIN_IDS[networkType]
 
     // Setup Multicall3 for batched RPC calls
-    const multicall3Address = CONTRACT_ADDRESSES.MULTICALL3[networkType]
+    const multicall3Address =
+      this._multicall3Address ?? CONTRACT_ADDRESSES.MULTICALL3[networkType as keyof typeof CONTRACT_ADDRESSES.MULTICALL3]
+    if (!multicall3Address) {
+      throw createError(
+        'PaymentsService',
+        '_getPermitSignature',
+        `No Multicall3 address available for network: ${networkType}`
+      )
+    }
     const multicall = new ethers.Contract(multicall3Address, CONTRACT_ABIS.MULTICALL3, this._provider)
 
     // Create interfaces for encoding/decoding

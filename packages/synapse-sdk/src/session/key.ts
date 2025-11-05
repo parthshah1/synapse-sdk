@@ -81,11 +81,13 @@ export class SessionKey {
   async fetchExpiries(permissions: string[] = PDP_PERMISSIONS): Promise<Record<string, bigint>> {
     const network = await getFilecoinNetworkType(this._provider)
 
-    const multicall = new ethers.Contract(
-      CONTRACT_ADDRESSES.MULTICALL3[network],
-      CONTRACT_ABIS.MULTICALL3,
-      this._provider
-    )
+    const multicall3Address =
+      this._multicall3Address ?? CONTRACT_ADDRESSES.MULTICALL3[network as keyof typeof CONTRACT_ADDRESSES.MULTICALL3]
+    if (!multicall3Address) {
+      throw new Error(`No Multicall3 address available for network: ${network}`)
+    }
+
+    const multicall = new ethers.Contract(multicall3Address, CONTRACT_ABIS.MULTICALL3, this._provider)
     const registryInterface = new ethers.Interface(CONTRACT_ABIS.SESSION_KEY_REGISTRY)
 
     const [ownerAddress, signerAddress, registryAddress] = await Promise.all([
