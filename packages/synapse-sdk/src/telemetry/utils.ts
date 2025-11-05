@@ -21,8 +21,10 @@ export type SentryType = SentryNodeType | SentryBrowserType
 export async function getSentry(): Promise<SentryType | null> {
   try {
     if (isBrowser) {
+      // @ts-ignore - Sentry is an optional dependency, module may not exist at compile time
       return (await import('@sentry/browser')) as SentryBrowserType
     }
+    // @ts-ignore - Sentry is an optional dependency, module may not exist at compile time
     return (await import('@sentry/node')) as SentryNodeType
   } catch {
     // Sentry dependencies not available (optional peer dependencies)
