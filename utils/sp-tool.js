@@ -11,9 +11,10 @@
 
 import { ethers } from 'ethers'
 import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/index.js'
-import { CONTRACT_ADDRESSES, RPC_URLS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
+import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
 import { getFilecoinNetworkType } from '../packages/synapse-sdk/dist/src/utils/network.js'
 import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/index.js'
+import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
 
 // Default PDP offering values
 const PDP_DEFAULTS = {
@@ -533,28 +534,32 @@ async function handleRegister(provider, signer, options) {
       }
     }
 
-    // Encode PDP offering
-    const encodedOffering = await registry.encodePDPOffering({
+    // Convert monthly price to daily price (divide by ~30 days)
+    const storagePricePerTibPerDay = PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH
+
+    // Prepare PDP offering object
+    const pdpOffering = {
       serviceURL: options.http,
       minPieceSizeInBytes: PDP_DEFAULTS.MIN_PIECE_SIZE,
       maxPieceSizeInBytes: PDP_DEFAULTS.MAX_PIECE_SIZE,
       ipniPiece: PDP_DEFAULTS.IPNI_PIECE,
       ipniIpfs: PDP_DEFAULTS.IPNI_IPFS,
-      storagePricePerTibPerMonth: PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH,
-      minProvingPeriodInEpochs: PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS,
+      storagePricePerTibPerDay: storagePricePerTibPerDay,
+      minProvingPeriodInEpochs: BigInt(PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS),
       location: options.location || PDP_DEFAULTS.LOCATION,
-      paymentTokenAddress: options['payment-token'] || usdfcAddress,
-    })
+      paymentTokenAddress: (options['payment-token'] || usdfcAddress),
+    }
 
-    // Prepare capability arrays from --capability flags
+    // Prepare custom capabilities from --capability flags
+    const customCapabilities = {}
     const capabilities = normalizeCapabilities(options.capability)
-    const capabilityKeys = []
-    const capabilityValues = []
     for (const cap of capabilities) {
       const [key, value] = cap.split('=')
-      capabilityKeys.push(key)
-      capabilityValues.push(value)
+      customCapabilities[key] = value
     }
+
+    // Encode PDP offering into capability keys and values
+    const [pdpCapabilityKeys, pdpCapabilityValues] = encodePDPCapabilities(pdpOffering, customCapabilities)
 
     // Call registerProvider with value
     const tx = await contract.registerProvider(
@@ -562,9 +567,8 @@ async function handleRegister(provider, signer, options) {
       options.name,
       options.description || '',
       0, // ProductType.PDP
-      encodedOffering,
-      capabilityKeys,
-      capabilityValues,
+      pdpCapabilityKeys,
+      pdpCapabilityValues,
       { value: registrationFee }
     )
 
@@ -695,6 +699,19 @@ async function handlePDPUpdate(registry, signer, options, provider) {
     }
   }
 
+  // Convert monthly price to daily price if needed
+  // If updating price, use the new price; otherwise use current daily price or default
+  let storagePricePerTibPerDay
+  if (options.price) {
+    // User provided monthly price, convert to daily
+    const storagePricePerTibPerMonth = BigInt(options.price)
+    storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+  } else {
+    // Use current daily price or default (convert default monthly to daily)
+    storagePricePerTibPerDay = currentPDP?.offering.storagePricePerTibPerDay || 
+      (PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH)
+  }
+
   // Prepare updated PDP offering by merging current values with new ones
   const updatedOffering = {
     serviceURL: options['service-url'] || currentPDP?.offering.serviceURL || '',
@@ -712,12 +729,10 @@ async function handlePDPUpdate(registry, signer, options, provider) {
       options['ipni-ipfs'] !== undefined
         ? options['ipni-ipfs'] === 'true'
         : currentPDP?.offering.ipniIpfs || PDP_DEFAULTS.IPNI_IPFS,
-    storagePricePerTibPerMonth: options.price
-      ? BigInt(options.price)
-      : currentPDP?.offering.storagePricePerTibPerMonth || PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH,
+    storagePricePerTibPerDay: storagePricePerTibPerDay,
     minProvingPeriodInEpochs: options['min-proving-period']
-      ? Number(options['min-proving-period'])
-      : currentPDP?.offering.minProvingPeriodInEpochs || PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS,
+      ? BigInt(options['min-proving-period'])
+      : currentPDP?.offering.minProvingPeriodInEpochs || BigInt(PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS),
     location: options.location || currentPDP?.offering.location || PDP_DEFAULTS.LOCATION,
     paymentTokenAddress: options['payment-token'] || currentPDP?.offering.paymentTokenAddress || usdfcAddress,
   }
@@ -748,10 +763,15 @@ async function handlePDPUpdate(registry, signer, options, provider) {
     console.log(`    Service URL: ${currentPDP?.offering.serviceURL || 'none'} → ${updatedOffering.serviceURL}`)
   if (options.location)
     console.log(`    Location: ${currentPDP?.offering.location || 'none'} → ${updatedOffering.location}`)
-  if (options.price)
+  if (options.price) {
+    const currentMonthly = currentPDP?.offering.storagePricePerTibPerDay 
+      ? currentPDP.offering.storagePricePerTibPerDay * TIME_CONSTANTS.DAYS_PER_MONTH
+      : null
+    const newMonthly = BigInt(options.price)
     console.log(
-      `    Price: ${currentPDP?.offering.storagePricePerTibPerMonth || 'none'} → ${updatedOffering.storagePricePerTibPerMonth} USDFC base units/TiB/month`
+      `    Price: ${currentMonthly || 'none'} → ${newMonthly} USDFC base units/TiB/month`
     )
+  }
   if (options['min-piece-size'])
     console.log(
       `    Min Piece Size: ${currentPDP?.offering.minPieceSizeInBytes || 'none'} → ${updatedOffering.minPieceSizeInBytes} bytes`
