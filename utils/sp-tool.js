@@ -16,16 +16,32 @@ import { getFilecoinNetworkType } from '../packages/synapse-sdk/dist/src/utils/n
 import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/index.js'
 import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
 
-// Default PDP offering values
-const PDP_DEFAULTS = {
-  MIN_PIECE_SIZE: 127n,
-  MAX_PIECE_SIZE: (32n * 1024n ** 3n * 126n) / 127n, // ~32 GiB adjusted for fr32 padding (127/126 expansion)
-  IPNI_PIECE: true,
-  IPNI_IPFS: true,
-  STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
-  MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
-  LOCATION: 'C=US;ST=Unknown;L=Unknown', // Default location (DN format) - required by contract, cannot be empty
-  // PAYMENT_TOKEN_ADDRESS resolved dynamically from CONTRACT_ADDRESSES.USDFC[network]
+// Default PDP offering values (can be overridden per network)
+function getPDPDefaults(network) {
+  const baseDefaults = {
+    MIN_PIECE_SIZE: 127n,
+    MAX_PIECE_SIZE: (32n * 1024n ** 3n * 126n) / 127n, // ~32 GiB adjusted for fr32 padding (127/126 expansion)
+    STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
+    LOCATION: 'C=US;ST=Unknown;L=Unknown', // Default location (DN format) - required by contract, cannot be empty
+  }
+
+  // Network-specific defaults
+  if (network === 'devnet') {
+    return {
+      ...baseDefaults,
+      IPNI_PIECE: false, // IPNI disabled for devnet
+      IPNI_IPFS: false, // IPNI disabled for devnet
+      MIN_PROVING_PERIOD_EPOCHS: 5, // 5 epochs for devnet (faster testing)
+    }
+  }
+
+  // Defaults for mainnet/calibration
+  return {
+    ...baseDefaults,
+    IPNI_PIECE: true,
+    IPNI_IPFS: true,
+    MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
+  }
 }
 
 // Parse command line arguments
@@ -534,19 +550,24 @@ async function handleRegister(provider, signer, options) {
       }
     }
 
+    // Get network-specific defaults
+    const pdpDefaults = getPDPDefaults(network)
+
     // Convert monthly price to daily price (divide by ~30 days)
-    const storagePricePerTibPerDay = PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH
+    const storagePricePerTibPerDay = pdpDefaults.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH
 
     // Prepare PDP offering object
     const pdpOffering = {
       serviceURL: options.http,
-      minPieceSizeInBytes: PDP_DEFAULTS.MIN_PIECE_SIZE,
-      maxPieceSizeInBytes: PDP_DEFAULTS.MAX_PIECE_SIZE,
-      ipniPiece: PDP_DEFAULTS.IPNI_PIECE,
-      ipniIpfs: PDP_DEFAULTS.IPNI_IPFS,
+      minPieceSizeInBytes: pdpDefaults.MIN_PIECE_SIZE,
+      maxPieceSizeInBytes: pdpDefaults.MAX_PIECE_SIZE,
+      ipniPiece: options['ipni-piece'] !== undefined ? options['ipni-piece'] === 'true' : pdpDefaults.IPNI_PIECE,
+      ipniIpfs: options['ipni-ipfs'] !== undefined ? options['ipni-ipfs'] === 'true' : pdpDefaults.IPNI_IPFS,
       storagePricePerTibPerDay: storagePricePerTibPerDay,
-      minProvingPeriodInEpochs: BigInt(PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS),
-      location: options.location || PDP_DEFAULTS.LOCATION, // Location is required, cannot be empty
+      minProvingPeriodInEpochs: options['min-proving-period'] 
+        ? BigInt(options['min-proving-period']) 
+        : BigInt(pdpDefaults.MIN_PROVING_PERIOD_EPOCHS),
+      location: options.location || pdpDefaults.LOCATION, // Location is required, cannot be empty
       paymentTokenAddress: (options['payment-token'] || usdfcAddress),
     }
 
@@ -610,6 +631,10 @@ async function handleUpdate(provider, signer, options) {
       process.exit(1)
     }
   }
+
+  // Get network for defaults
+  const network = await getFilecoinNetworkType(provider)
+  const pdpDefaults = getPDPDefaults(network)
 
   // Get the provider owned by this signer
   const current = await registry.getProviderByAddress(signerAddress)
@@ -686,6 +711,8 @@ async function handlePDPUpdate(registry, signer, options, provider) {
 
   // Get network-specific USDFC address
   const network = await getFilecoinNetworkType(provider)
+  const pdpDefaults = getPDPDefaults(network)
+  
   let usdfcAddress = process.env.USDFC_ADDRESS
   if (!usdfcAddress) {
     if (network === 'devnet') {
@@ -709,7 +736,7 @@ async function handlePDPUpdate(registry, signer, options, provider) {
   } else {
     // Use current daily price or default (convert default monthly to daily)
     storagePricePerTibPerDay = currentPDP?.offering.storagePricePerTibPerDay || 
-      (PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH)
+      (pdpDefaults.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH)
   }
 
   // Prepare updated PDP offering by merging current values with new ones
@@ -717,23 +744,23 @@ async function handlePDPUpdate(registry, signer, options, provider) {
     serviceURL: options['service-url'] || currentPDP?.offering.serviceURL || '',
     minPieceSizeInBytes: options['min-piece-size']
       ? BigInt(options['min-piece-size'])
-      : currentPDP?.offering.minPieceSizeInBytes || PDP_DEFAULTS.MIN_PIECE_SIZE,
+      : currentPDP?.offering.minPieceSizeInBytes || pdpDefaults.MIN_PIECE_SIZE,
     maxPieceSizeInBytes: options['max-piece-size']
       ? BigInt(options['max-piece-size'])
-      : currentPDP?.offering.maxPieceSizeInBytes || PDP_DEFAULTS.MAX_PIECE_SIZE,
+      : currentPDP?.offering.maxPieceSizeInBytes || pdpDefaults.MAX_PIECE_SIZE,
     ipniPiece:
       options['ipni-piece'] !== undefined
         ? options['ipni-piece'] === 'true'
-        : currentPDP?.offering.ipniPiece || PDP_DEFAULTS.IPNI_PIECE,
+        : currentPDP?.offering.ipniPiece ?? pdpDefaults.IPNI_PIECE,
     ipniIpfs:
       options['ipni-ipfs'] !== undefined
         ? options['ipni-ipfs'] === 'true'
-        : currentPDP?.offering.ipniIpfs || PDP_DEFAULTS.IPNI_IPFS,
+        : currentPDP?.offering.ipniIpfs ?? pdpDefaults.IPNI_IPFS,
     storagePricePerTibPerDay: storagePricePerTibPerDay,
     minProvingPeriodInEpochs: options['min-proving-period']
       ? BigInt(options['min-proving-period'])
-      : currentPDP?.offering.minProvingPeriodInEpochs || BigInt(PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS),
-    location: options.location || currentPDP?.offering.location || PDP_DEFAULTS.LOCATION,
+      : currentPDP?.offering.minProvingPeriodInEpochs || BigInt(pdpDefaults.MIN_PROVING_PERIOD_EPOCHS),
+    location: options.location || currentPDP?.offering.location || pdpDefaults.LOCATION,
     paymentTokenAddress: options['payment-token'] || currentPDP?.offering.paymentTokenAddress || usdfcAddress,
   }
 
@@ -1008,11 +1035,38 @@ Examples:
   // Setup signer if needed
   let signer = null
   if (['register', 'update', 'deregister', 'warm-add', 'warm-remove'].includes(command)) {
-    if (!options.key) {
+    // Determine which private key to use based on command type
+    let privateKey = options.key
+    
+    if (!privateKey) {
+      // For SP operations, use SP_PRIVATE_KEY
+      if (['register', 'update', 'deregister'].includes(command)) {
+        privateKey = process.env.SP_PRIVATE_KEY
+        if (privateKey) {
+          console.log('Using SP_PRIVATE_KEY from environment')
+        }
+      }
+      
+      // For WarmStorage operations, try DEPLOYER_PRIVATE_KEY first, then PRIVATE_KEY
+      if (['warm-add', 'warm-remove'].includes(command)) {
+        privateKey = process.env.DEPLOYER_PRIVATE_KEY || process.env.PRIVATE_KEY
+        if (privateKey) {
+          console.log(`Using ${process.env.DEPLOYER_PRIVATE_KEY ? 'DEPLOYER_PRIVATE_KEY' : 'PRIVATE_KEY'} from environment`)
+        }
+      }
+    }
+    
+    if (!privateKey) {
       console.error('Error: --key is required for write operations')
+      if (['register', 'update', 'deregister'].includes(command)) {
+        console.error('  Or set SP_PRIVATE_KEY environment variable')
+      } else {
+        console.error('  Or set DEPLOYER_PRIVATE_KEY or PRIVATE_KEY environment variable')
+      }
       process.exit(1)
     }
-    signer = new ethers.Wallet(options.key, provider)
+    
+    signer = new ethers.Wallet(privateKey, provider)
     console.log(`Using signer address: ${await signer.getAddress()}`)
   }
 
