@@ -979,11 +979,13 @@ Examples:
   if (!defaultRpcUrl) {
     defaultRpcUrl = RPC_URLS[network]?.http
   }
-  if (!options['rpc-url'] && !defaultRpcUrl) {
-    console.error(`Error: No RPC URL available for network '${network}'. Please provide --rpc-url.`)
+  // Check environment variable if --rpc-url not provided
+  const envRpcUrl = process.env.RPC_URL
+  if (!options['rpc-url'] && !defaultRpcUrl && !envRpcUrl) {
+    console.error(`Error: No RPC URL available for network '${network}'. Please provide --rpc-url or set RPC_URL environment variable.`)
     process.exit(1)
   }
-  const rpcUrl = options['rpc-url'] || defaultRpcUrl
+  const rpcUrl = options['rpc-url'] || envRpcUrl || defaultRpcUrl
 
   // Smart provider selection based on URL protocol
   let provider
