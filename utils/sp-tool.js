@@ -59,30 +59,53 @@ function parseArgs() {
 
 // Get or create SPRegistryService instance
 async function getRegistryService(provider, options) {
+  // For devnet, get runtime addresses from environment variables
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  
   // Priority 1: Direct registry address
   if (options.registry) {
     console.log(`Using registry address: ${options.registry}`)
-    return new SPRegistryService(provider, options.registry)
+    return new SPRegistryService(provider, options.registry, multicall3Address)
   }
 
   // Priority 2: Discover from warm storage
   let warmStorageAddress = options.warm
 
-  // Priority 3: Use default warm storage
+  // Priority 3: Use default warm storage or environment variable for devnet
   if (warmStorageAddress) {
     console.log(`Using WarmStorage: ${warmStorageAddress}`)
   } else {
     const networkName = await getFilecoinNetworkType(provider)
-    warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[networkName]
-    console.log(`Using default WarmStorage for ${networkName}: ${warmStorageAddress}`)
+    if (networkName === 'devnet') {
+      warmStorageAddress = process.env.WARM_STORAGE_CONTRACT_ADDRESS
+      if (!warmStorageAddress) {
+        console.error('Error: WARM_STORAGE_CONTRACT_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+      console.log(`Using WarmStorage from environment for devnet: ${warmStorageAddress}`)
+    } else {
+      warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[networkName]
+      if (!warmStorageAddress) {
+        console.error(`Error: No default Warm Storage address for ${networkName} network. Please provide --warm or WARM_STORAGE_CONTRACT_ADDRESS.`)
+        process.exit(1)
+      }
+      console.log(`Using default WarmStorage for ${networkName}: ${warmStorageAddress}`)
+    }
   }
 
   // Create WarmStorageService and discover registry
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  // For devnet, pass runtime addresses
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicall3Address,
+    warmStorageViewAddress
+  )
   const registryAddress = warmStorage.getServiceProviderRegistryAddress()
   console.log(`Discovered registry: ${registryAddress}`)
 
-  return new SPRegistryService(provider, registryAddress)
+  return new SPRegistryService(provider, registryAddress, multicall3Address)
 }
 
 // Validate Distinguished Name (DN) format for location
@@ -310,10 +333,33 @@ async function handleWarmAdd(provider, signer, options) {
     process.exit(1)
   }
 
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  let warmStorageAddress = options.warm
+  if (!warmStorageAddress) {
+    if (network === 'devnet') {
+      warmStorageAddress = process.env.WARM_STORAGE_CONTRACT_ADDRESS
+      if (!warmStorageAddress) {
+        console.error('Error: WARM_STORAGE_CONTRACT_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+    } else {
+      warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[network]
+      if (!warmStorageAddress) {
+        console.error(`Error: No default Warm Storage address for ${network} network. Please provide --warm or WARM_STORAGE_CONTRACT_ADDRESS.`)
+        process.exit(1)
+      }
+    }
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicall3Address,
+    warmStorageViewAddress
+  )
 
   // Get current approved providers
   const currentProviders = await warmStorage.getApprovedProviderIds()
@@ -342,10 +388,33 @@ async function handleWarmRemove(provider, signer, options) {
     process.exit(1)
   }
 
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  let warmStorageAddress = options.warm
+  if (!warmStorageAddress) {
+    if (network === 'devnet') {
+      warmStorageAddress = process.env.WARM_STORAGE_CONTRACT_ADDRESS
+      if (!warmStorageAddress) {
+        console.error('Error: WARM_STORAGE_CONTRACT_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+    } else {
+      warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[network]
+      if (!warmStorageAddress) {
+        console.error(`Error: No default Warm Storage address for ${network} network. Please provide --warm or WARM_STORAGE_CONTRACT_ADDRESS.`)
+        process.exit(1)
+      }
+    }
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicall3Address,
+    warmStorageViewAddress
+  )
 
   console.log(`\nRemoving provider #${options.id} from WarmStorage approved list...`)
 
@@ -369,10 +438,33 @@ async function handleWarmRemove(provider, signer, options) {
 }
 
 async function handleWarmList(provider, options) {
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  let warmStorageAddress = options.warm
+  if (!warmStorageAddress) {
+    if (network === 'devnet') {
+      warmStorageAddress = process.env.WARM_STORAGE_CONTRACT_ADDRESS
+      if (!warmStorageAddress) {
+        console.error('Error: WARM_STORAGE_CONTRACT_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+    } else {
+      warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[network]
+      if (!warmStorageAddress) {
+        console.error(`Error: No default Warm Storage address for ${network} network. Please provide --warm or WARM_STORAGE_CONTRACT_ADDRESS.`)
+        process.exit(1)
+      }
+    }
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicall3Address,
+    warmStorageViewAddress
+  )
 
   console.log('\nFetching WarmStorage approved providers...\n')
 
@@ -428,7 +520,18 @@ async function handleRegister(provider, signer, options) {
 
     // Get network-specific USDFC address
     const network = await getFilecoinNetworkType(provider)
-    const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+    let usdfcAddress = process.env.USDFC_ADDRESS
+    if (!usdfcAddress) {
+      if (network === 'devnet') {
+        console.error('Error: USDFC_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+      usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+      if (!usdfcAddress) {
+        console.error(`Error: No default USDFC address for ${network} network. Please provide USDFC_ADDRESS environment variable.`)
+        process.exit(1)
+      }
+    }
 
     // Encode PDP offering
     const encodedOffering = await registry.encodePDPOffering({
@@ -579,7 +682,18 @@ async function handlePDPUpdate(registry, signer, options, provider) {
 
   // Get network-specific USDFC address
   const network = await getFilecoinNetworkType(provider)
-  const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+  let usdfcAddress = process.env.USDFC_ADDRESS
+  if (!usdfcAddress) {
+    if (network === 'devnet') {
+      console.error('Error: USDFC_ADDRESS environment variable is required for devnet')
+      process.exit(1)
+    }
+    usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+    if (!usdfcAddress) {
+      console.error(`Error: No default USDFC address for ${network} network. Please provide USDFC_ADDRESS environment variable.`)
+      process.exit(1)
+    }
+  }
 
   // Prepare updated PDP offering by merging current values with new ones
   const updatedOffering = {
@@ -766,7 +880,7 @@ WarmStorage Commands:
   warm-list   List WarmStorage approved providers
 
 Options:
-  --network <network>       Network to use: 'mainnet' or 'calibration' (default: calibration)
+  --network <network>       Network to use: 'mainnet', 'calibration', or 'devnet' (default: calibration)
   --rpc-url <url>           RPC endpoint (overrides network default)
   --key <private-key>       Private key for signing (required for write operations)
   --registry <address>      Registry contract address (overrides discovery)
@@ -835,8 +949,8 @@ Examples:
 
   // Setup provider based on network flag
   const network = options.network || 'calibration'
-  if (network !== 'mainnet' && network !== 'calibration') {
-    console.error(`Error: Invalid network '${network}'. Must be 'mainnet' or 'calibration'`)
+  if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
+    console.error(`Error: Invalid network '${network}'. Must be 'mainnet', 'calibration', or 'devnet'`)
     process.exit(1)
   }
 

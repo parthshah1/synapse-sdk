@@ -81,7 +81,7 @@
  *
  * - WARM_STORAGE_CONTRACT_ADDRESS: Warm Storage address (defaults to address in constants.ts for network)
  * - SP_REGISTRY_ADDRESS: ServiceProviderRegistry address (auto-discovered from WarmStorage if not provided)
- * - NETWORK: Either 'mainnet' or 'calibration' (default: calibration)
+ * - NETWORK: Either 'mainnet', 'calibration', or 'devnet' (default: calibration)
  * - RPC_URL: Custom RPC endpoint (overrides default network RPC)
  * - SP_NAME: Provider name (default: "Test Service Provider")
  * - SP_DESCRIPTION: Provider description (default: "Test provider for Warm Storage")
@@ -339,14 +339,31 @@ async function setupClient(clientSigner, provider, warmStorage, warmStorageAddre
   // === Set up client payment approvals ===
   log('\n💰 Client Payment Setup')
 
-  // USDFC token address on calibration network
-  // This is a standard token address across all deployments
-  const usdfcAddress = '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
+  // USDFC token address - use environment variable for devnet, otherwise use network default
+  const currentNetwork = process.env.NETWORK || 'calibration'
+  let usdfcAddress = process.env.USDFC_ADDRESS
+  if (!usdfcAddress) {
+    // For devnet, USDFC_ADDRESS must be provided via environment variable
+    if (currentNetwork === 'devnet') {
+      error('USDFC_ADDRESS environment variable is required for devnet')
+      process.exit(1)
+    }
+    // For mainnet/calibration, use default from constants or hardcoded calibration address
+    usdfcAddress = CONTRACT_ADDRESSES.USDFC?.[currentNetwork] || '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
+  }
   log(`USDFC token address: ${usdfcAddress}`)
 
   // Create PaymentsService
   const paymentsAddress = await warmStorage.getPaymentsAddress()
-  const paymentsService = new PaymentsService(provider, clientSigner, paymentsAddress, usdfcAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const paymentsService = new PaymentsService(
+    provider,
+    clientSigner,
+    paymentsAddress,
+    usdfcAddress,
+    false, // disableNonceManager
+    multicall3Address // multicall3Address for devnet
+  )
 
   // Check client's USDFC balance
   const clientBalance = await paymentsService.walletBalance(TOKENS.USDFC)
@@ -433,8 +450,8 @@ async function main() {
     const customRpcUrl = process.env.RPC_URL
 
     // Validate network
-    if (network !== 'mainnet' && network !== 'calibration') {
-      error('NETWORK must be either "mainnet" or "calibration"')
+    if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
+      error('NETWORK must be either "mainnet", "calibration", or "devnet"')
       process.exit(1)
     }
 
@@ -467,7 +484,15 @@ async function main() {
     provider._getConnection().timeout = 120000 // 2 minutes
 
     // Create WarmStorage service
-    const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+    // For devnet, pass runtime addresses from environment variables
+    const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+    const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+    const warmStorage = await WarmStorageService.create(
+      provider,
+      warmStorageAddress,
+      multicall3Address,
+      warmStorageViewAddress
+    )
 
     // Variables to track what was setup
     let providerId = null
