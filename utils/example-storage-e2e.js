@@ -274,6 +274,7 @@ async function main() {
       return storageContext.upload(file.data, {
         onUploadComplete: (pieceCid) => {
           console.log(`✓ ${pfx}Upload complete! PieceCID: ${pieceCid}`)
+          console.log(`  ${pfx}Polling for piece to be indexed... (this may take up to 5 minutes)`)
         },
         onPieceAdded: (transaction) => {
           console.log(`✓ ${pfx}Piece addition transaction: ${transaction.hash}`)
@@ -281,6 +282,22 @@ async function main() {
         onPieceConfirmed: (pieceIds) => {
           console.log(`✓ ${pfx}Piece addition confirmed! IDs: ${pieceIds.join(', ')}`)
         },
+      }).catch((error) => {
+        console.error(`\n❌ ${pfx}Upload failed:`)
+        console.error(`Error: ${error.message}`)
+        if (error.stack) {
+          console.error(`Stack: ${error.stack}`)
+        }
+        // Try to get more details about the piece if available
+        if (error.cause) {
+          console.error(`Cause: ${error.cause.message || error.cause}`)
+        }
+        console.error(`\nDebugging tips:`)
+        console.error(`1. Check if Curio service is running and accessible at http://curio:80`)
+        console.error(`2. Verify the piece was uploaded: curl http://curio:80/pdp/piece?pieceCid=<pieceCid>`)
+        console.error(`3. Check Curio logs for any errors during upload/indexing`)
+        console.error(`4. Ensure Curio has proper configuration and database connectivity`)
+        throw error
       })
     })
 
