@@ -31,7 +31,7 @@ import {
 import { calculate } from '../packages/synapse-sdk/dist/src/piece/index.js'
 
 // Configuration from environment
-const PRIVATE_KEY = process.env.PRIVATE_KEY
+const PRIVATE_KEY = process.env.PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
 const RPC_URL = process.env.RPC_URL || 'https://api.calibration.node.glif.io/rpc/v1'
 const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS || process.env.WARM_STORAGE_CONTRACT_ADDRESS // Optional - will use default for network
 const WARM_STORAGE_VIEW_ADDRESS = process.env.WARM_STORAGE_VIEW_ADDRESS // Required for devnet
@@ -46,7 +46,7 @@ function printUsageAndExit() {
 
 // Validate inputs
 if (!PRIVATE_KEY) {
-  console.error('ERROR: PRIVATE_KEY environment variable is required')
+  console.error('ERROR: PRIVATE_KEY or CLIENT_PRIVATE_KEY environment variable is required')
   printUsageAndExit()
 }
 
