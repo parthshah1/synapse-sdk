@@ -27,17 +27,12 @@ import {
   SIZE_CONSTANTS,
   Synapse,
   TIME_CONSTANTS,
-} from '../packages/synapse-sdk/dist/src/index.js'
-import { calculate } from '../packages/synapse-sdk/dist/src/piece/index.js'
+} from '../packages/synapse-sdk/src/index.ts'
 
 // Configuration from environment
-const PRIVATE_KEY = process.env.PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+const PRIVATE_KEY = process.env.PRIVATE_KEY
 const RPC_URL = process.env.RPC_URL || 'https://api.calibration.node.glif.io/rpc/v1'
-const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS || process.env.WARM_STORAGE_CONTRACT_ADDRESS // Optional - will use default for network
-const WARM_STORAGE_VIEW_ADDRESS = process.env.WARM_STORAGE_VIEW_ADDRESS // Required for devnet
-const MULTICALL3_ADDRESS = process.env.MULTICALL3_ADDRESS // Required for devnet
-const USDFC_ADDRESS = process.env.USDFC_ADDRESS // Required for devnet
-const GENESIS_TIMESTAMP = process.env.GENESIS_TIMESTAMP ? Number(process.env.GENESIS_TIMESTAMP) : undefined // Optional for devnet
+const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS // Optional - will use default for network
 
 function printUsageAndExit() {
   console.error('Usage: PRIVATE_KEY=0x... node example-storage-e2e.js <file-path> [file-path2] ...')
@@ -46,7 +41,7 @@ function printUsageAndExit() {
 
 // Validate inputs
 if (!PRIVATE_KEY) {
-  console.error('ERROR: PRIVATE_KEY or CLIENT_PRIVATE_KEY environment variable is required')
+  console.error('ERROR: PRIVATE_KEY environment variable is required')
   printUsageAndExit()
 }
 
@@ -110,27 +105,6 @@ async function main() {
     if (WARM_STORAGE_ADDRESS) {
       synapseOptions.warmStorageAddress = WARM_STORAGE_ADDRESS
       console.log(`Warm Storage Address: ${WARM_STORAGE_ADDRESS}`)
-    }
-
-    // Add devnet-specific addresses if provided
-    if (MULTICALL3_ADDRESS) {
-      synapseOptions.multicall3Address = MULTICALL3_ADDRESS
-      console.log(`Multicall3 Address: ${MULTICALL3_ADDRESS}`)
-    }
-
-    if (WARM_STORAGE_VIEW_ADDRESS) {
-      synapseOptions.warmStorageViewAddress = WARM_STORAGE_VIEW_ADDRESS
-      console.log(`Warm Storage View Address: ${WARM_STORAGE_VIEW_ADDRESS}`)
-    }
-
-    if (USDFC_ADDRESS) {
-      synapseOptions.usdfcAddress = USDFC_ADDRESS
-      console.log(`USDFC Address: ${USDFC_ADDRESS}`)
-    }
-
-    if (GENESIS_TIMESTAMP !== undefined) {
-      synapseOptions.genesisTimestamp = GENESIS_TIMESTAMP
-      console.log(`Genesis Timestamp: ${GENESIS_TIMESTAMP}`)
     }
 
     const synapse = await Synapse.create(synapseOptions)
@@ -273,10 +247,7 @@ async function main() {
       return synapse.storage.upload(file.data, {
         contexts,
         onUploadComplete: (pieceCid) => {
-          console.log(`✓ ${pfx}Data upload complete! PieceCID: ${pieceCid}`)
-          console.log(`  ${pfx}Polling for piece to be indexed/processed... (this may take up to 5 minutes)`)
-          console.log(`  ${pfx}Query URL: http://curio:80/pdp/piece?pieceCid=${pieceCid}`)
-          console.log(`  ${pfx}You can manually check: curl "http://curio:80/pdp/piece?pieceCid=${pieceCid}"`)
+          console.log(`✓ ${pfx}Upload complete! PieceCID: ${pieceCid}`)
         },
         onPieceAdded: (transactionHash) => {
           console.log(`✓ ${pfx}Piece addition transaction: ${transactionHash}`)
@@ -284,22 +255,6 @@ async function main() {
         onPieceConfirmed: (pieceIds) => {
           console.log(`✓ ${pfx}Piece addition confirmed! IDs: ${pieceIds.join(', ')}`)
         },
-      }).catch((error) => {
-        console.error(`\n❌ ${pfx}Upload failed:`)
-        console.error(`Error: ${error.message}`)
-        if (error.stack) {
-          console.error(`Stack: ${error.stack}`)
-        }
-        // Try to get more details about the piece if available
-        if (error.cause) {
-          console.error(`Cause: ${error.cause.message || error.cause}`)
-        }
-        console.error(`\nDebugging tips:`)
-        console.error(`1. Check if Curio service is running and accessible at http://curio:80`)
-        console.error(`2. Verify the piece was uploaded: curl http://curio:80/pdp/piece?pieceCid=<pieceCid>`)
-        console.error(`3. Check Curio logs for any errors during upload/indexing`)
-        console.error(`4. Ensure Curio has proper configuration and database connectivity`)
-        throw error
       })
     })
 
