@@ -19,8 +19,12 @@ export class CreateDataSetError extends SynapseError {
 
   constructor(error: string) {
     const decodedError = decodePDPError(error)
+    // Include raw error in message if decoding didn't provide useful info
+    const details = decodedError.includes('Service Provider PDP') && error !== decodedError
+      ? `${decodedError}\nRaw error: ${error}`
+      : decodedError
     super(`Failed to create data set.`, {
-      details: decodedError,
+      details,
     })
   }
 
@@ -34,8 +38,12 @@ export class PollDataSetCreationStatusError extends SynapseError {
 
   constructor(error: string) {
     const decodedError = decodePDPError(error)
+    // Include raw error in message if decoding didn't provide useful info
+    const details = decodedError.includes('Service Provider PDP') && error !== decodedError
+      ? `${decodedError}\nRaw error: ${error}`
+      : decodedError
     super(`Failed to check data set creation status.`, {
-      details: decodedError,
+      details,
     })
   }
 

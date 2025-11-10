@@ -1038,8 +1038,30 @@ export class StorageContext {
         batch.forEach((item) => {
           item.callbacks?.onPieceAdded?.(createAndAddPiecesResult.txHash as Hex)
         })
-        const confirmedDataset = await SP.pollForDataSetCreationStatus(createAndAddPiecesResult)
-        this._dataSetId = confirmedDataset.dataSetId
+        
+        // Debug logging for status polling
+        if (process.env.DEBUG_PDP) {
+          console.debug('[PDP Debug] Polling for data set creation status:', {
+            txHash: createAndAddPiecesResult.txHash,
+            statusUrl: createAndAddPiecesResult.statusUrl,
+          })
+        }
+        
+        let confirmedDataset
+        try {
+          confirmedDataset = await SP.pollForDataSetCreationStatus(createAndAddPiecesResult)
+          this._dataSetId = confirmedDataset.dataSetId
+        } catch (pollError) {
+          // Wrap polling error with more context
+          if (pollError instanceof Error) {
+            const enhancedError = new Error(
+              `Failed to confirm data set creation. Initial request returned txHash: ${createAndAddPiecesResult.txHash}, statusUrl: ${createAndAddPiecesResult.statusUrl}. Original error: ${pollError.message}`
+            )
+            enhancedError.cause = pollError
+            throw enhancedError
+          }
+          throw pollError
+        }
 
         const confirmedPieces = await SP.pollForAddPiecesStatus({
           statusUrl: new URL(
