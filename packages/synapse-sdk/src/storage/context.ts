@@ -1012,11 +1012,23 @@ export class StorageContext {
         const finalMetadata = objectToEntries(metadataObj)
         // Create a new data set and add pieces to it
         // Use PDPVerifier address as recordKeeper (Curio talks to PDPVerifier, not WarmStorage directly)
+        const pdpVerifierAddress = this._synapse.getPDPVerifierAddress()
+        const warmStorageAddress = this._synapse.getWarmStorageAddress()
+        // Debug logging for troubleshooting
+        if (process.env.DEBUG_PDP) {
+          console.debug('[PDP Debug] Creating data set with:', {
+            recordKeeper: pdpVerifierAddress,
+            warmStorageAddress,
+            payee: this._provider.payee,
+            payer,
+            pieceCount: pieceCids.length,
+          })
+        }
         const createAndAddPiecesResult = await this._pdpServer.createAndAddPieces(
           randU256(),
           this._provider.payee,
           payer,
-          this._synapse.getPDPVerifierAddress(),
+          pdpVerifierAddress,
           pieceCids,
           {
             dataset: finalMetadata,
@@ -1053,7 +1065,19 @@ export class StorageContext {
       })
     } catch (error) {
       // Reject all promises in the batch
-      const finalError = createError('StorageContext', 'addPieces', 'Failed to add piece to data set', error)
+      // Include the original error message for better debugging
+      let errorMessage = 'Failed to add piece to data set'
+      if (error instanceof Error) {
+        // Include the underlying error message if available
+        if (error.message) {
+          errorMessage += ` - ${error.message}`
+        }
+        // Include error details if it's a SynapseError
+        if ('details' in error && error.details) {
+          errorMessage += `\nDetails: ${typeof error.details === 'string' ? error.details : JSON.stringify(error.details)}`
+        }
+      }
+      const finalError = createError('StorageContext', 'addPieces', errorMessage, error)
       batch.forEach((item) => {
         item.reject(finalError)
       })
