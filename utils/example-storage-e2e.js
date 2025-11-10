@@ -27,12 +27,16 @@ import {
   SIZE_CONSTANTS,
   Synapse,
   TIME_CONSTANTS,
-} from '../packages/synapse-sdk/src/index.ts'
+} from '../packages/synapse-sdk/dist/src/index.js'
 
 // Configuration from environment
-const PRIVATE_KEY = process.env.PRIVATE_KEY
+const PRIVATE_KEY = process.env.PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
 const RPC_URL = process.env.RPC_URL || 'https://api.calibration.node.glif.io/rpc/v1'
-const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS // Optional - will use default for network
+const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS || process.env.WARM_STORAGE_CONTRACT_ADDRESS // Optional - will use default for network
+const WARM_STORAGE_VIEW_ADDRESS = process.env.WARM_STORAGE_VIEW_ADDRESS // Required for devnet
+const MULTICALL3_ADDRESS = process.env.MULTICALL3_ADDRESS // Required for devnet
+const USDFC_ADDRESS = process.env.USDFC_ADDRESS // Required for devnet
+const GENESIS_TIMESTAMP = process.env.GENESIS_TIMESTAMP ? Number(process.env.GENESIS_TIMESTAMP) : undefined // Optional for devnet
 
 function printUsageAndExit() {
   console.error('Usage: PRIVATE_KEY=0x... node example-storage-e2e.js <file-path> [file-path2] ...')
@@ -41,7 +45,7 @@ function printUsageAndExit() {
 
 // Validate inputs
 if (!PRIVATE_KEY) {
-  console.error('ERROR: PRIVATE_KEY environment variable is required')
+  console.error('ERROR: PRIVATE_KEY or CLIENT_PRIVATE_KEY environment variable is required')
   printUsageAndExit()
 }
 
@@ -105,6 +109,27 @@ async function main() {
     if (WARM_STORAGE_ADDRESS) {
       synapseOptions.warmStorageAddress = WARM_STORAGE_ADDRESS
       console.log(`Warm Storage Address: ${WARM_STORAGE_ADDRESS}`)
+    }
+
+    // Add devnet-specific addresses if provided
+    if (MULTICALL3_ADDRESS) {
+      synapseOptions.multicall3Address = MULTICALL3_ADDRESS
+      console.log(`Multicall3 Address: ${MULTICALL3_ADDRESS}`)
+    }
+
+    if (WARM_STORAGE_VIEW_ADDRESS) {
+      synapseOptions.warmStorageViewAddress = WARM_STORAGE_VIEW_ADDRESS
+      console.log(`Warm Storage View Address: ${WARM_STORAGE_VIEW_ADDRESS}`)
+    }
+
+    if (USDFC_ADDRESS) {
+      synapseOptions.usdfcAddress = USDFC_ADDRESS
+      console.log(`USDFC Address: ${USDFC_ADDRESS}`)
+    }
+
+    if (GENESIS_TIMESTAMP !== undefined) {
+      synapseOptions.genesisTimestamp = GENESIS_TIMESTAMP
+      console.log(`Genesis Timestamp: ${GENESIS_TIMESTAMP}`)
     }
 
     const synapse = await Synapse.create(synapseOptions)
