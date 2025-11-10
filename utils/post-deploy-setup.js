@@ -97,6 +97,7 @@ import { PaymentsService } from '../packages/synapse-sdk/dist/src/payments/servi
 import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/service.js'
 import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
 import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/service.js'
+import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
 
 // Constants for payment approvals
 const RATE_ALLOWANCE_PER_EPOCH = ethers.parseUnits('0.1', 18) // 0.1 USDFC per epoch
@@ -218,6 +219,9 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
     const contract = spRegistry._getRegistryContract().connect(spSigner)
     const registrationFee = await contract.REGISTRATION_FEE()
 
+    // Convert monthly price to daily price (divide by ~30 days)
+    const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+
     // Encode PDP offering for initial registration
     const pdpOffering = {
       serviceURL: spServiceUrl,
@@ -225,13 +229,14 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       maxPieceSizeInBytes: maxPieceSize,
       ipniPiece: false,
       ipniIpfs: false,
-      storagePricePerTibPerMonth,
+      storagePricePerTibPerDay: storagePricePerTibPerDay,
       minProvingPeriodInEpochs: minProvingPeriod,
-      location,
+      location: location || 'C=US;ST=Unknown;L=Unknown', // Ensure non-empty location
       paymentTokenAddress: '0x0000000000000000000000000000000000000000',
     }
 
-    const encodedOffering = await spRegistry.encodePDPOffering(pdpOffering)
+    // Encode PDP offering into capability keys and values
+    const [pdpCapabilityKeys, pdpCapabilityValues] = encodePDPCapabilities(pdpOffering, {})
 
     // Register with PDP product included
     // Use the SP's address as both serviceProvider (msg.sender) and payee
@@ -240,9 +245,8 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       spName,
       spDescription,
       0, // ProductType.PDP
-      encodedOffering,
-      location ? ['location'] : [], // capability keys
-      location ? [location] : [], // capability values
+      pdpCapabilityKeys,
+      pdpCapabilityValues,
       { value: registrationFee }
     )
 
@@ -266,15 +270,26 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       success('Provider has active PDP product')
       log(`  Service URL: ${pdpService.offering.serviceURL}`)
       log(`  Location: ${pdpService.offering.location}`)
-      log(`  Storage Price: ${ethers.formatUnits(pdpService.offering.storagePricePerTibPerMonth, 18)} USDFC/TiB/month`)
+      // Display price (handle both per-month and per-day formats)
+      const displayedPrice = pdpService.offering.storagePricePerTibPerDay 
+        ? ethers.formatUnits(pdpService.offering.storagePricePerTibPerDay * TIME_CONSTANTS.DAYS_PER_MONTH, 18)
+        : (pdpService.offering.storagePricePerTibPerMonth 
+          ? ethers.formatUnits(pdpService.offering.storagePricePerTibPerMonth, 18)
+          : 'N/A')
+      log(`  Storage Price: ${displayedPrice} USDFC/TiB/month`)
       log(`  Min Piece Size: ${pdpService.offering.minPieceSizeInBytes} bytes`)
       log(`  Max Piece Size: ${pdpService.offering.maxPieceSizeInBytes} bytes`)
+
+      // Convert monthly price to daily price for comparison
+      const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+      const currentPricePerDay = pdpService.offering.storagePricePerTibPerDay || (pdpService.offering.storagePricePerTibPerMonth ? pdpService.offering.storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH : 0n)
+      const normalizedLocation = location || 'C=US;ST=Unknown;L=Unknown'
 
       // Check if we need to update the product
       if (
         pdpService.offering.serviceURL !== spServiceUrl ||
-        pdpService.offering.location !== location ||
-        pdpService.offering.storagePricePerTibPerMonth !== storagePricePerTibPerMonth
+        pdpService.offering.location !== normalizedLocation ||
+        currentPricePerDay !== storagePricePerTibPerDay
       ) {
         log('Updating PDP product configuration...')
         const pdpData = {
@@ -283,13 +298,13 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
           maxPieceSizeInBytes: maxPieceSize,
           ipniPiece: false,
           ipniIpfs: false,
-          storagePricePerTibPerMonth,
+          storagePricePerTibPerDay: storagePricePerTibPerDay,
           minProvingPeriodInEpochs: minProvingPeriod,
-          location,
+          location: normalizedLocation,
           paymentTokenAddress: '0x0000000000000000000000000000000000000000',
         }
 
-        const capabilities = location ? { location } : {}
+        const capabilities = {}
         const updateTx = await spRegistry.updatePDPProduct(spSigner, pdpData, capabilities)
         await updateTx.wait(1)
         success(`PDP product updated. Tx: ${updateTx.hash}`)
@@ -298,19 +313,20 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
   } else {
     // This shouldn't happen if registration worked correctly, but handle it just in case
     log('Provider missing PDP product, adding it now...')
+    const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
     const pdpData = {
       serviceURL: spServiceUrl,
       minPieceSizeInBytes: minPieceSize,
       maxPieceSizeInBytes: maxPieceSize,
       ipniPiece: false,
       ipniIpfs: false,
-      storagePricePerTibPerMonth,
+      storagePricePerTibPerDay: storagePricePerTibPerDay,
       minProvingPeriodInEpochs: minProvingPeriod,
-      location,
+      location: location || 'C=US;ST=Unknown;L=Unknown',
       paymentTokenAddress: '0x0000000000000000000000000000000000000000',
     }
 
-    const capabilities = location ? { location } : {}
+    const capabilities = {}
     const addProductTx = await spRegistry.addPDPProduct(spSigner, pdpData, capabilities)
     await addProductTx.wait(1)
     success(`PDP product added. Tx: ${addProductTx.hash}`)
@@ -494,6 +510,9 @@ async function main() {
       warmStorageViewAddress
     )
 
+    // Store multicall3Address for later use in SPRegistryService
+    const storedMulticall3Address = multicall3Address
+
     // Variables to track what was setup
     let providerId = null
     let providerName = null
@@ -545,7 +564,8 @@ async function main() {
       }
 
       // Create registry service
-      const spRegistry = new SPRegistryService(provider, spRegistryAddress)
+      // For devnet, pass multicall3Address if available
+      const spRegistry = new SPRegistryService(provider, spRegistryAddress, storedMulticall3Address)
 
       // Setup provider
       const config = {

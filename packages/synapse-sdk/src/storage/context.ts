@@ -1011,11 +1011,12 @@ export class StorageContext {
         // Convert to MetadataEntry[] for PDP operations (requires ordered array)
         const finalMetadata = objectToEntries(metadataObj)
         // Create a new data set and add pieces to it
+        // Use PDPVerifier address as recordKeeper (Curio talks to PDPVerifier, not WarmStorage directly)
         const createAndAddPiecesResult = await this._pdpServer.createAndAddPieces(
           randU256(),
           this._provider.payee,
           payer,
-          this._synapse.getWarmStorageAddress(),
+          this._synapse.getPDPVerifierAddress(),
           pieceCids,
           {
             dataset: finalMetadata,
