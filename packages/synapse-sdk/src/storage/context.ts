@@ -979,6 +979,20 @@ export class StorageContext {
           this._warmStorageService.validateDataSet(this.dataSetId),
           this._warmStorageService.getDataSet(this.dataSetId),
         ])
+        
+        // Debug logging for troubleshooting
+        if (process.env.DEBUG_PDP) {
+          const pdpVerifier = this._warmStorageService.getPDPVerifierAddress()
+          const warmStorageAddress = this._synapse.getWarmStorageAddress()
+          console.debug('[PDP Debug] Adding pieces to existing data set:', {
+            dataSetId: this.dataSetId,
+            clientDataSetId: dataSetInfo.clientDataSetId,
+            warmStorageAddress,
+            pdpVerifierAddress: pdpVerifier,
+            pieceCount: pieceCids.length,
+          })
+        }
+        
         // Add pieces to the data set
         const addPiecesResult = await this._pdpServer.addPieces(
           this.dataSetId, // PDPVerifier data set ID
