@@ -1011,14 +1011,12 @@ export class StorageContext {
         // Convert to MetadataEntry[] for PDP operations (requires ordered array)
         const finalMetadata = objectToEntries(metadataObj)
         // Create a new data set and add pieces to it
-        // Use PDPVerifier address as recordKeeper (Curio talks to PDPVerifier, not WarmStorage directly)
-        const pdpVerifierAddress = this._synapse.getPDPVerifierAddress()
+        // Use WarmStorage address as recordKeeper (FWSS contract address)
         const warmStorageAddress = this._synapse.getWarmStorageAddress()
         // Debug logging for troubleshooting
         if (process.env.DEBUG_PDP) {
           console.debug('[PDP Debug] Creating data set with:', {
-            recordKeeper: pdpVerifierAddress,
-            warmStorageAddress,
+            recordKeeper: warmStorageAddress,
             payee: this._provider.payee,
             payer,
             pieceCount: pieceCids.length,
@@ -1028,7 +1026,7 @@ export class StorageContext {
           randU256(),
           this._provider.payee,
           payer,
-          pdpVerifierAddress,
+          warmStorageAddress,
           pieceCids,
           {
             dataset: finalMetadata,

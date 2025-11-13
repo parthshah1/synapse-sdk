@@ -176,7 +176,7 @@ export class PDPServer {
    * @param payee - Address that will receive payments (service provider)
    * @param payer - Address that will pay for the storage (client)
    * @param metadata - Metadata entries for the data set (key-value pairs)
-   * @param recordKeeper - Address of the Warm Storage contract
+   * @param recordKeeper - Address of the WarmStorage (FWSS) contract
    * @returns Promise that resolves with transaction hash and status URL
    */
   async createDataSet(
@@ -215,7 +215,7 @@ export class PDPServer {
    * @param clientDataSetId  - Unique ID for the client's dataset
    * @param payee - Address that will receive payments (service provider)
    * @param payer - Address that will pay for the storage (client)
-   * @param recordKeeper - Address of the Warm Storage contract
+   * @param recordKeeper - Address of the WarmStorage (FWSS) contract
    * @param pieceDataArray - Array of piece data containing PieceCID CIDs and raw sizes
    * @param metadata - Optional metadata for dataset and each of the pieces.
    * @returns Promise that resolves with transaction hash and status URL
