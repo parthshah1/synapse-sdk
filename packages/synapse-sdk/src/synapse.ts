@@ -405,6 +405,46 @@ export class Synapse {
   }
 
   /**
+   * Gets the USDFC token address for the current network
+   * @returns The USDFC token address
+   */
+  getUSDFCTokenAddress(): string {
+    return this._warmStorageService.getUSDFCTokenAddress()
+  }
+
+  /**
+   * Gets the Service Provider Registry address for the current network
+   * @returns The Service Provider Registry address
+   */
+  getServiceProviderRegistryAddress(): string {
+    return this._warmStorageService.getServiceProviderRegistryAddress()
+  }
+
+  /**
+   * Gets the Session Key Registry address for the current network
+   * @returns The Session Key Registry address
+   */
+  getSessionKeyRegistryAddress(): string {
+    return this._warmStorageService.getSessionKeyRegistryAddress()
+  }
+
+  /**
+   * Gets the Warm Storage View contract address for the current network
+   * @returns The Warm Storage View contract address
+   */
+  getWarmStorageViewAddress(): string {
+    return this._warmStorageService.getViewContractAddress()
+  }
+
+  /**
+   * Gets the FilBeam Beneficiary address for the current network
+   * @returns The FilBeam Beneficiary address
+   */
+  getFilBeamBeneficiaryAddress(): string {
+    return this._warmStorageService.getFilBeamBeneficiaryAddress()
+  }
+
+  /**
    * Gets the payment service instance
    * @returns The payment service
    */

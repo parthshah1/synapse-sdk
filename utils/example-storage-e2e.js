@@ -135,10 +135,22 @@ async function main() {
     const synapse = await Synapse.create(synapseOptions)
     console.log('✓ Synapse instance created')
 
+    // Log all discovered addresses via Multicall3
+    console.log('\n--- Discovered Contract Addresses (via Multicall3) ---')
+    console.log(`Multicall3 Address: ${synapse.getMulticall3Address()}`)
+    console.log(`Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
+    console.log(`Warm Storage View Address: ${synapse.getWarmStorageViewAddress()}`)
+    console.log(`Payments Address: ${synapse.getPaymentsAddress()}`)
+    console.log(`PDP Verifier Address: ${synapse.getPDPVerifierAddress()}`)
+    console.log(`USDFC Token Address: ${synapse.getUSDFCTokenAddress()}`)
+    console.log(`Service Provider Registry Address: ${synapse.getServiceProviderRegistryAddress()}`)
+    console.log(`Session Key Registry Address: ${synapse.getSessionKeyRegistryAddress()}`)
+    console.log(`FilBeam Beneficiary Address: ${synapse.getFilBeamBeneficiaryAddress()}`)
+
     // Get wallet info
     const signer = synapse.getSigner()
     const address = await signer.getAddress()
-    console.log(`Wallet address: ${address}`)
+    console.log(`\nWallet address: ${address}`)
 
     // Check balances
     console.log('\n--- Checking Balances ---')
@@ -198,6 +210,7 @@ async function main() {
       callbacks: {
         onProviderSelected: (provider) => {
           console.log(`✓ Selected service provider: ${provider.serviceProvider}`)
+          console.log(`  Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
         },
         onDataSetResolved: (info) => {
           if (info.isExisting) {
@@ -230,6 +243,7 @@ async function main() {
       console.log(`Provider Address: ${providerInfo.serviceProvider}`)
       console.log(`Provider Name: ${providerInfo.name}`)
       console.log(`Active: ${providerInfo.active}`)
+      console.log(`Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
       if (providerInfo.products.PDP?.data.serviceURL) {
         console.log(`PDP Service URL: ${providerInfo.products.PDP.data.serviceURL}`)
       }

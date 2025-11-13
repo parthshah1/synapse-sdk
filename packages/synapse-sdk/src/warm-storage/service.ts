@@ -248,6 +248,10 @@ export class WarmStorageService {
     return this._addresses.sessionKeyRegistry
   }
 
+  getFilBeamBeneficiaryAddress(): string {
+    return this._addresses.filBeamBeneficiary
+  }
+
   /**
    * Get the provider instance
    * @returns The ethers provider
