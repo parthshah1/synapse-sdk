@@ -178,16 +178,31 @@ export type PDPCreateDataSetAndAddPiecesOptions = {
  * @returns The response from the create data set and add pieces to it on PDP API.
  */
 export async function createDataSetAndAddPieces(options: PDPCreateDataSetAndAddPiecesOptions) {
+  // Prepare request body
+  const requestBody = {
+    recordKeeper: options.recordKeeper,
+    extraData: options.extraData,
+    pieces: options.pieces.map((piece) => ({
+      pieceCid: piece.toString(),
+      subPieces: [{ subPieceCid: piece.toString() }],
+    })),
+  }
+  
+  const requestUrl = new URL(`pdp/data-sets/create-and-add`, options.endpoint)
+  
+  // Log the actual HTTP request being sent
+  if (process.env.DEBUG_PDP || process.env.DEBUG_CURIO) {
+    console.log('\n=== HTTP Request to Curio ===')
+    console.log(`URL: ${requestUrl.toString()}`)
+    console.log(`Method: POST`)
+    console.log(`Headers: Content-Type: application/json`)
+    console.log(`Body:`, JSON.stringify(requestBody, null, 2))
+    console.log('=============================\n')
+  }
+  
   // Send the create data set message to the PDP
-  const response = await request.post(new URL(`pdp/data-sets/create-and-add`, options.endpoint), {
-    body: JSON.stringify({
-      recordKeeper: options.recordKeeper,
-      extraData: options.extraData,
-      pieces: options.pieces.map((piece) => ({
-        pieceCid: piece.toString(),
-        subPieces: [{ subPieceCid: piece.toString() }],
-      })),
-    }),
+  const response = await request.post(requestUrl, {
+    body: JSON.stringify(requestBody),
     headers: {
       'Content-Type': 'application/json',
     },
