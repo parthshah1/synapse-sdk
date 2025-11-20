@@ -269,55 +269,7 @@ export class PDPServer {
     const abiCoder = ethers.AbiCoder.defaultAbiCoder()
     const encoded = abiCoder.encode(['bytes', 'bytes'], [`0x${createExtraData}`, `0x${addExtraData}`])
 
-    // Comprehensive logging for debugging Curio requests
     const pieces = pieceDataArray.map(asPieceCID).filter((t) => t != null)
-    const requestBody = {
-      recordKeeper: recordKeeper,
-      extraData: encoded,
-      pieces: pieces.map((piece) => ({
-        pieceCid: piece.toString(),
-        subPieces: [{ subPieceCid: piece.toString() }],
-      })),
-    }
-    
-    // Log detailed request information (always enabled for debugging)
-    console.log('\n=== Curio Request: createDataSetAndAddPieces ===')
-    console.log(`Endpoint: ${this._serviceURL}/pdp/data-sets/create-and-add`)
-    console.log(`Method: POST`)
-    console.log(`RecordKeeper: ${recordKeeper}`)
-    console.log(`Pieces (${pieces.length}):`)
-    pieces.forEach((piece, idx) => {
-      console.log(`  [${idx}] PieceCID: ${piece.toString()}`)
-    })
-    console.log(`ExtraData (hex, length: ${encoded.length}): ${encoded.substring(0, 100)}...`)
-    console.log('\n--- Decoded ExtraData Components ---')
-    try {
-      const [decodedCreateExtraData, decodedAddExtraData] = abiCoder.decode(['bytes', 'bytes'], encoded)
-      console.log('CreateDataSet ExtraData (decoded):')
-      const createDecoded = abiCoder.decode(
-        ['address', 'uint256', 'string[]', 'string[]', 'bytes'],
-        decodedCreateExtraData
-      )
-      console.log(`  payer: ${createDecoded[0]}`)
-      console.log(`  clientDataSetId: ${createDecoded[1]}`)
-      console.log(`  metadataKeys: [${createDecoded[2].join(', ')}]`)
-      console.log(`  metadataValues: [${createDecoded[3].join(', ')}]`)
-      console.log(`  signature: ${createDecoded[4].substring(0, 20)}... (length: ${createDecoded[4].length})`)
-      console.log('AddPieces ExtraData (decoded):')
-      const addDecoded = abiCoder.decode(
-        ['uint256', 'string[][]', 'string[][]', 'bytes'],
-        decodedAddExtraData
-      )
-      console.log(`  nonce: ${addDecoded[0]}`)
-      console.log(`  metadataKeys: ${JSON.stringify(addDecoded[1])}`)
-      console.log(`  metadataValues: ${JSON.stringify(addDecoded[2])}`)
-      console.log(`  signature: ${addDecoded[3].substring(0, 20)}... (length: ${addDecoded[3].length})`)
-    } catch (decodeError) {
-      console.log(`  Failed to decode extraData: ${decodeError instanceof Error ? decodeError.message : String(decodeError)}`)
-    }
-    console.log('\n--- Full Request Body (JSON) ---')
-    console.log(JSON.stringify(requestBody, null, 2))
-    console.log('==========================================\n')
 
     return SP.createDataSetAndAddPieces({
       endpoint: this._serviceURL,

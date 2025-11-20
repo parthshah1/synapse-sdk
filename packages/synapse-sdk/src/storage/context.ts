@@ -961,9 +961,6 @@ export class StorageContext {
       }
 
       const waited = Date.now() - waitStart
-      if (waited > pollInterval) {
-        console.debug(`Waited ${waited}ms for ${uploadsToWaitFor.size} active upload(s) to complete`)
-      }
     }
 
     // Extract up to uploadBatchSize pending pieces
@@ -979,19 +976,6 @@ export class StorageContext {
           this._warmStorageService.validateDataSet(this.dataSetId),
           this._warmStorageService.getDataSet(this.dataSetId),
         ])
-        
-        // Debug logging for troubleshooting
-        if (process.env.DEBUG_PDP) {
-          const pdpVerifier = this._warmStorageService.getPDPVerifierAddress()
-          const warmStorageAddress = this._synapse.getWarmStorageAddress()
-          console.debug('[PDP Debug] Adding pieces to existing data set:', {
-            dataSetId: this.dataSetId,
-            clientDataSetId: dataSetInfo.clientDataSetId,
-            warmStorageAddress,
-            pdpVerifierAddress: pdpVerifier,
-            pieceCount: pieceCids.length,
-          })
-        }
         
         // Add pieces to the data set
         const addPiecesResult = await this._pdpServer.addPieces(
@@ -1027,15 +1011,6 @@ export class StorageContext {
         // Create a new data set and add pieces to it
         // Use WarmStorage address as recordKeeper (FWSS contract address)
         const warmStorageAddress = this._synapse.getWarmStorageAddress()
-        // Debug logging for troubleshooting
-        if (process.env.DEBUG_PDP) {
-          console.debug('[PDP Debug] Creating data set with:', {
-            recordKeeper: warmStorageAddress,
-            payee: this._provider.payee,
-            payer,
-            pieceCount: pieceCids.length,
-          })
-        }
         const createAndAddPiecesResult = await this._pdpServer.createAndAddPieces(
           randU256(),
           this._provider.payee,
@@ -1050,14 +1025,6 @@ export class StorageContext {
         batch.forEach((item) => {
           item.callbacks?.onPieceAdded?.(createAndAddPiecesResult.txHash as Hex)
         })
-        
-        // Debug logging for status polling
-        if (process.env.DEBUG_PDP) {
-          console.debug('[PDP Debug] Polling for data set creation status:', {
-            txHash: createAndAddPiecesResult.txHash,
-            statusUrl: createAndAddPiecesResult.statusUrl,
-          })
-        }
         
         let confirmedDataset
         try {
@@ -1300,8 +1267,7 @@ export class StorageContext {
       // Get data set data
       this._pdpServer
         .getDataSet(this.dataSetId)
-        .catch((error) => {
-          console.debug('Failed to get data set data:', error)
+        .catch(() => {
           return null
         }),
       // Get current epoch
@@ -1391,7 +1357,6 @@ export class StorageContext {
             // 2. Data set is not active
             // In case 1, we might have just proven, so set lastProven to very recent
             // This is a temporary state and should resolve quickly
-            console.debug('Data set has nextChallengeEpoch=0, may have just been proven')
           }
         }
       }
