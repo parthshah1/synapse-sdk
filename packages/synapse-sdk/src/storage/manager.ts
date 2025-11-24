@@ -21,8 +21,9 @@
  */
 
 import * as Piece from '@filoz/synapse-core/piece'
+import { asPieceCID, downloadAndValidate } from '@filoz/synapse-core/piece'
+import { randIndex } from '@filoz/synapse-core/utils'
 import { ethers } from 'ethers'
-import { asPieceCID, downloadAndValidate } from '../piece/index.ts'
 import { SPRegistryService } from '../sp-registry/index.ts'
 import type { Synapse } from '../synapse.ts'
 import type {
@@ -79,6 +80,12 @@ interface StorageManagerUploadOptions extends StorageServiceOptions {
 
   // Callbacks that can include both creation and upload callbacks
   callbacks?: Partial<CombinedCallbacks>
+
+  /** Optional pre-calculated PieceCID to skip CommP calculation (BYO PieceCID, it will be checked by the server) */
+  pieceCid?: PieceCID
+
+  /** Optional AbortSignal to cancel the upload */
+  signal?: AbortSignal
 }
 
 interface StorageManagerDownloadOptions extends DownloadOptions {
@@ -94,7 +101,7 @@ export class StorageManager {
   private readonly _withCDN: boolean
   private readonly _dev: boolean
   private readonly _withIpni: boolean | undefined
-  private _defaultContext?: StorageContext
+  private _defaultContexts?: StorageContext[]
 
   constructor(
     synapse: Synapse,
@@ -116,11 +123,18 @@ export class StorageManager {
    * Upload data to storage
    * Uses the storage contexts or context provided in the options
    * Otherwise creates/reuses default context
+   *
+   * Accepts Uint8Array or ReadableStream<Uint8Array>.
+   * For large files, prefer streaming to minimize memory usage.
+   *
+   * Note: Multi-context uploads (uploading to multiple providers simultaneously) currently
+   * only support Uint8Array. For streaming uploads with multiple contexts, convert your
+   * stream to Uint8Array first or use stream forking (future feature).
    */
   async upload(
-    data: Uint8Array | ArrayBuffer,
+    data: Uint8Array | ReadableStream<Uint8Array>,
     options?: StorageManagerUploadOptions
-  ): Promise<PromiseSettledResult<UploadResult>[]> {
+  ): Promise<UploadResult> {
     // Validate options - if context is provided, no other options should be set
     if (options?.context != null || options?.contexts != null) {
       const invalidOptions = []
@@ -147,25 +161,61 @@ export class StorageManager {
     }
 
     // Get the context to use
-    const contexts = options?.contexts ?? [options?.context ?? (await this.createContext(options))]
-    // Convert once
-    const dataBytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data
-    // Calculate pieceCid once
-    const pieceCid = Piece.calculate(dataBytes)
-
-    // Upload using the contexts with piece metadata
-    return await Promise.allSettled(
-      contexts.map((context) =>
-        context.upload(
-          dataBytes,
-          {
-            ...options?.callbacks,
+    const contexts =
+      options?.contexts ??
+      (options?.context
+        ? [options.context]
+        : await this.createContexts({
+            withCDN: options?.withCDN,
+            withIpni: options?.withIpni,
+            count: 1, // single context by default for now - this will be changed in a future version
+            dev: options?.dev,
+            uploadBatchSize: options?.uploadBatchSize,
+            forceCreateDataSets: options?.forceCreateDataSet,
             metadata: options?.metadata,
-          },
-          pieceCid
+            excludeProviderIds: options?.excludeProviderIds,
+            providerIds: options?.providerId ? [options.providerId] : undefined,
+            dataSetIds: options?.dataSetId ? [options.dataSetId] : undefined,
+            callbacks: options?.callbacks,
+          }))
+
+    // Multi-context upload handling
+    if (contexts.length > 1) {
+      // Multi-context uploads require Uint8Array to calculate pieceCid once
+      if (!(data instanceof Uint8Array)) {
+        throw createError(
+          'StorageManager',
+          'upload',
+          'Multi-context uploads currently only support Uint8Array. ' +
+            'For streaming uploads to multiple providers, convert your stream to Uint8Array first.'
         )
-      )
-    )
+      }
+
+      // Calculate pieceCid once for all contexts
+      const pieceCid = Piece.calculate(data)
+
+      // Upload to all contexts with the same pieceCid
+      return Promise.all(
+        contexts.map((context) =>
+          context.upload(data, {
+            ...options?.callbacks, // TODO: callbacks should be able to differentiate by provider
+            metadata: options?.metadata,
+            pieceCid,
+            signal: options?.signal,
+          })
+        )
+      ).then((results) => results[0]) // all results should be the same
+    } else {
+      // Single context upload - supports all data types
+      const context = contexts[0]
+
+      // Upload to single context
+      return context.upload(data, {
+        ...options?.callbacks,
+        metadata: options?.metadata,
+        signal: options?.signal,
+      })
+    }
   }
 
   /**
@@ -203,20 +253,20 @@ export class StorageManager {
 
     // Fast path: If we have a default context with CDN disabled and no specific provider requested,
     // check if the piece exists on the default context's provider first
-    if (this._defaultContext != null && !withCDN && options?.providerAddress == null) {
-      // Check if the default context has CDN disabled
-      const defaultHasCDN = (this._defaultContext as any)._withCDN ?? this._withCDN
-      if (defaultHasCDN === false) {
-        // Check if the piece exists on this provider
-        const hasPiece = await this._defaultContext.hasPiece(parsedPieceCID)
-        if (hasPiece) {
-          // Fast path: download directly from the default context's provider
-          return await this._defaultContext.download(pieceCid, options)
+    if (this._defaultContexts != null && !withCDN && options?.providerAddress == null) {
+      // from the default contexts, select a random storage provider that has the piece
+      const contextsWithoutCDN = this._defaultContexts.filter((context) => context.withCDN === false)
+      const contextsHavePiece = await Promise.all(contextsWithoutCDN.map((context) => context.hasPiece(parsedPieceCID)))
+      const defaultContextsWithPiece = contextsWithoutCDN.filter((_context, i) => contextsHavePiece[i])
+      if (defaultContextsWithPiece.length > 0) {
+        options = {
+          ...options,
+          providerAddress:
+            defaultContextsWithPiece[randIndex(defaultContextsWithPiece.length)].provider.serviceProvider,
         }
       }
     }
 
-    // Fall back to normal SP-agnostic download with discovery
     const clientAddress = await this._synapse.getClient().getAddress()
 
     // Use piece retriever to fetch
@@ -282,12 +332,63 @@ export class StorageManager {
    * @returns Promise resolving to array of storage contexts
    */
   async createContexts(options?: CreateContextsOptions): Promise<StorageContext[]> {
-    return await StorageContext.createContexts(this._synapse, this._warmStorageService, {
+    const withCDN = options?.withCDN ?? this._withCDN
+    const canUseDefault =
+      options == null ||
+      (options.providerIds == null &&
+        options.dataSetIds == null &&
+        options.forceCreateDataSets !== true &&
+        options.uploadBatchSize == null)
+    if (this._defaultContexts != null) {
+      const expectedSize = options?.count ?? 2
+      if (
+        this._defaultContexts.length === expectedSize &&
+        this._defaultContexts.every((context) => options?.excludeProviderIds?.includes(context.provider.id) !== true)
+      ) {
+        const requestedMetadata = combineMetadata(options?.metadata, withCDN)
+        if (
+          this._defaultContexts.every((defaultContext) =>
+            metadataMatches(defaultContext.dataSetMetadata, requestedMetadata)
+          )
+        ) {
+          if (options?.callbacks != null) {
+            for (const defaultContext of this._defaultContexts) {
+              try {
+                options.callbacks.onProviderSelected?.(defaultContext.provider)
+              } catch (error) {
+                console.error('Error in onProviderSelected callback:', error)
+              }
+
+              if (defaultContext.dataSetId != null) {
+                try {
+                  options.callbacks.onDataSetResolved?.({
+                    isExisting: true, // Always true for cached context
+                    dataSetId: defaultContext.dataSetId,
+                    provider: defaultContext.provider,
+                  })
+                } catch (error) {
+                  console.error('Error in onDataSetResolved callback:', error)
+                }
+              }
+            }
+          }
+          return this._defaultContexts
+        }
+      }
+    }
+
+    const contexts = await StorageContext.createContexts(this._synapse, this._warmStorageService, {
       ...options,
-      withCDN: options?.withCDN ?? this._withCDN,
+      withCDN,
       withIpni: options?.withIpni ?? this._withIpni,
       dev: options?.dev ?? this._dev,
     })
+
+    if (canUseDefault) {
+      this._defaultContexts = contexts
+    }
+
+    return contexts
   }
 
   /**
@@ -309,59 +410,54 @@ export class StorageManager {
         options.forceCreateDataSet !== true &&
         options.uploadBatchSize == null)
 
-    if (canUseDefault) {
+    if (canUseDefault && this._defaultContexts != null) {
       // Check if we have a default context with compatible metadata
-      if (
-        this._defaultContext != null &&
-        options?.excludeProviderIds?.includes(this._defaultContext.provider.id) !== true
-      ) {
-        // Combine the current request metadata with effective withCDN setting
-        const requestedMetadata = combineMetadata(options?.metadata, effectiveWithCDN)
 
+      const requestedMetadata = combineMetadata(options?.metadata, effectiveWithCDN)
+      for (const defaultContext of this._defaultContexts) {
+        if (options?.excludeProviderIds?.includes(defaultContext.provider.id)) {
+          continue
+        }
         // Check if the requested metadata matches what the default context was created with
-        if (metadataMatches(this._defaultContext.dataSetMetadata, requestedMetadata)) {
-          // Fire callbacks for cached context to ensure consistent behavior
-          if (options?.callbacks != null) {
-            try {
-              options.callbacks.onProviderSelected?.(this._defaultContext.provider)
-            } catch (error) {
-              console.error('Error in onProviderSelected callback:', error)
-            }
+        if (!metadataMatches(defaultContext.dataSetMetadata, requestedMetadata)) {
+          continue
+        }
+        // Fire callbacks for cached context to ensure consistent behavior
+        if (options?.callbacks != null) {
+          try {
+            options.callbacks.onProviderSelected?.(defaultContext.provider)
+          } catch (error) {
+            console.error('Error in onProviderSelected callback:', error)
+          }
 
-            if (this._defaultContext.dataSetId != null) {
-              try {
-                options.callbacks.onDataSetResolved?.({
-                  isExisting: true, // Always true for cached context
-                  dataSetId: this._defaultContext.dataSetId,
-                  provider: this._defaultContext.provider,
-                })
-              } catch (error) {
-                console.error('Error in onDataSetResolved callback:', error)
-              }
+          if (defaultContext.dataSetId != null) {
+            try {
+              options.callbacks.onDataSetResolved?.({
+                isExisting: true, // Always true for cached context
+                dataSetId: defaultContext.dataSetId,
+                provider: defaultContext.provider,
+              })
+            } catch (error) {
+              console.error('Error in onDataSetResolved callback:', error)
             }
           }
-          return this._defaultContext
         }
+        return defaultContext
       }
-
-      // Create new default context with current CDN setting
-      const context = await StorageContext.create(this._synapse, this._warmStorageService, {
-        ...options,
-        withCDN: effectiveWithCDN,
-        withIpni: options?.withIpni ?? this._withIpni,
-        dev: options?.dev ?? this._dev,
-      })
-      this._defaultContext = context
-      return context
     }
 
-    // Create a new context with specific options (not cached)
-    return await StorageContext.create(this._synapse, this._warmStorageService, {
+    // Create a new context with specific options
+    const context = await StorageContext.create(this._synapse, this._warmStorageService, {
       ...options,
       withCDN: effectiveWithCDN,
       withIpni: options?.withIpni ?? this._withIpni,
       dev: options?.dev ?? this._dev,
     })
+
+    if (canUseDefault) {
+      this._defaultContexts = [context]
+    }
+    return context
   }
 
   /**

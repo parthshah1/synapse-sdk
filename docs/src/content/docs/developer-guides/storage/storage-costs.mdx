@@ -1,0 +1,270 @@
+---
+title: Storage Costs
+description: Calculate storage costs and fund your account for future storage needs
+sidebar:
+  order: 2
+---
+
+Understanding storage costs helps you budget effectively and avoid service interruptions. This guide explains how to calculate costs and fund your account for Filecoin storage.
+
+## How Storage Costs Work
+
+Storage operates on a **pay-per-epoch** model where you deposit USDFC tokens and set allowances that control how much the storage service can spend.
+
+:::tip[What is an Epoch?]
+An **epoch** is Filecoin's block time, which is 30 seconds. Storage costs are calculated per epoch, ensuring you only pay for the storage time you actually use.
+:::
+
+### Pricing Components
+
+| Component      | Cost               | Notes                                                    |
+| -------------- | ------------------ | -------------------------------------------------------- |
+| **Storage**    | $2.50/TiB/month    | Minimum $0.06/month per data set (~24.567 GiB threshold) |
+| **CDN Egress** | $14/TiB downloaded  | 1 USDFC top-up ≈ 71.5 GiB of downloads                    |
+| **CDN Setup**  | 1 USDFC (one-time) | Per data set; reusing existing data sets incurs no cost  |
+
+:::note[Be aware]
+Per month means **per 30 days** here, not calendar month like a traditional storage service.
+:::
+**Pricing Logic:**
+
+- Storage **< 24.567 GiB**: Minimum $0.06/month applies
+- Storage **≥ 24.567 GiB**: Actual cost `(bytes / TiB) × $2.50/month`
+- CDN data sets require 1 USDFC setup on first creation only
+- CDN egress credits can be topped up anytime
+
+### Real-World Cost Examples
+
+**Example 1: NFT Collection (10,000 × 5 KiB ≈ 48.82 MiB)**
+
+```ts twoslash
+// 48.82 MiB less than 24.567 GiB threshold
+// Price is $0.06/month
+const PRICE_PER_MONTH = 0.06;
+const months = 24;
+const PRICE_FOR_24_MONTHS = PRICE_PER_MONTH * 24; // 1.44 USDFC
+```
+
+| Duration  | Total Cost |
+| --------- | ---------- |
+| 1 month   | 0.06 USDFC |
+| 24 months | 1.44 USDFC |
+
+---
+
+**Example 2: User Content Platform with CDN**
+
+- **Storage:** 1,000 users × 100 MiB ≈ 100,000 MiB
+- **Traffic:** 1,000 users × 100 MiB/month ≈ 100,000 MiB/month egress
+
+```ts twoslash
+const STORAGE_PRICE_PER_TIB_PER_MONTH = 2.5; // $2.50/TiB/month
+const CDN_EGRESS_PRICE_PER_TIB = 14; // $14/TiB downloaded
+const storageMiB = 100_000;
+const egressMiB = 100_000;
+
+// Storage: 100,000 MiB ≈ 0.0953 TiB
+const storageTiB = storageMiB / 1024 / 1024;
+
+// Egress: 100,000 MiB ≈ 0.0953 TiB
+const egressTiB = egressMiB / 1024 / 1024;
+
+// Storage cost per month: 0.0953 TiB × $2.50 ≈ $0.238/month
+const storageCostPerMonth = storageTiB * STORAGE_PRICE_PER_TIB_PER_MONTH;
+
+// Egress cost per month: 0.0953 TiB × $14 ≈ $1.334/month
+const egressCostPerMonth = egressTiB * CDN_EGRESS_PRICE_PER_TIB;
+
+// Total cost per month: $0.238/month + $1.334/month ≈ $1.572/month
+const totalCostPerMonth = storageCostPerMonth + egressCostPerMonth;
+
+// Total cost for 24 months: $1.572/month × 24 ≈ $37.728
+const totalCostFor24Months = totalCostPerMonth * 24;
+```
+
+| Cost Component | Per Month        | 24 Months         |
+| -------------- | ---------------- | ----------------- |
+| Storage        | ≈ 0.238 USDFC    | ≈ 5.71 USDFC      |
+| CDN Egress     | ≈ 1.334 USDFC    | ≈ 32.016 USDFC     |
+| **Total**      | **≈ 1.572 USDFC** | **≈ 37.728 USDFC** |
+
+## Warm Storage Service Approvals
+
+Before uploading, approve the **WarmStorage operator** and fund your account. FWSS requires a 30-day prepayment buffer—when your balance drops below 30 days, the provider may remove your data.
+
+**Approval Components:**
+
+| Component             | Purpose                               | Formula When Adding Storage              |
+| --------------------- | ------------------------------------- | ---------------------------------------- |
+| **Deposit Amount**    | USDFC tokens for storage duration     | Total cost for desired months            |
+| **Rate Allowance**    | Max spending per epoch (cumulative)   | `currentRateUsed + newRate`              |
+| **Lockup Allowance**  | 30-day prepayment buffer (cumulative) | `currentLockupUsed + (newRate × 86,400)` |
+| **Max Lockup Period** | Safety limit on locked funds          | constant of 86,400 epochs (30 days)      |
+
+---
+
+## Detailed Calculator Guide
+
+Learn how to calculate storage costs, required operator allowances and fund your account for future storage needs.
+
+In this guide we will calculate the costs for a 1 GiB storage capacity for 12 months.
+
+### Step 1: Calculate Base Storage Costs
+
+Get pricing information and calculate the cost per epoch for your storage capacity:
+
+```ts twoslash
+import {
+  Synapse,
+  WarmStorageService,
+  SIZE_CONSTANTS,
+} from "@filoz/synapse-sdk";
+const synapse = await Synapse.create({});
+// ---cut---
+// Get pricing structure
+const warmStorageAddress = await synapse.getWarmStorageAddress();
+const warmStorageService = await WarmStorageService.create(
+  synapse.getProvider(),
+  warmStorageAddress
+);
+
+const { minimumPricePerMonth, epochsPerMonth, pricePerTiBPerMonthNoCDN } =
+  await warmStorageService.getServicePrice();
+
+// Calculate base cost per month
+const bytesToStore = SIZE_CONSTANTS.GiB; // 1 GiB
+let pricePerMonth =
+  (pricePerTiBPerMonthNoCDN * BigInt(bytesToStore)) /
+  BigInt(SIZE_CONSTANTS.TiB);
+
+// Apply minimum pricing if needed
+if (pricePerMonth < minimumPricePerMonth) {
+  pricePerMonth = minimumPricePerMonth;
+}
+
+// Calculate per-epoch cost
+const pricePerEpoch = pricePerMonth / epochsPerMonth;
+
+console.log("Monthly cost:", pricePerMonth);
+console.log("Per-epoch cost:", pricePerEpoch);
+```
+
+### Step 2: Calculate Required Allowances
+
+Calculate cumulative allowances for your new storage, accounting for existing usage.
+
+:::note[Understanding Cumulative Allowances]
+Allowances are **cumulative** - you must add your new storage requirements to any existing usage. This is because the WarmStorage operator needs permission to spend on behalf of all your active datasets, not just the new one. Think of it like updating a credit limit to cover both old and new subscriptions.
+
+- **Rate Allowance**: Total per-epoch spending across all datasets
+- **Lockup Allowance**: Total 30-day buffer across all datasets
+  :::
+
+```ts twoslash
+import { Synapse, TOKENS, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+const synapse = await Synapse.create({});
+const pricePerMonth = null as unknown as bigint;
+const pricePerEpoch = null as unknown as bigint;
+const warmStorageAddress = await synapse.getWarmStorageAddress();
+// ---cut---
+// Define storage duration in months (minimum 1 month)
+const persistencePeriodInMonths = 12;
+
+// Check if creating a new CDN dataset (creates context to determine if one exists)
+const storageContext = await synapse.storage.createContext({
+  withCDN: true,
+  metadata: { Application: "MyApp", Version: "1.0.0" },
+});
+const newCDNDataSetNeeded = storageContext.dataSetId === null;
+
+const warmStorageDefaultLockupPeriod = TIME_CONSTANTS.DEFAULT_LOCKUP_DAYS; // 30 days
+
+// Calculate total cost and lockup needed for THIS storage addition
+const cdnDataSetCreationCost = 10n ** 18n; // 1 USDFC
+let totalCostNeeded = pricePerMonth * BigInt(persistencePeriodInMonths);
+let lockupNeeded = pricePerMonth * warmStorageDefaultLockupPeriod;
+if (newCDNDataSetNeeded) {
+  lockupNeeded += cdnDataSetCreationCost;
+  totalCostNeeded += cdnDataSetCreationCost;
+}
+
+// Get current approval status (what's already being used)
+const [approval, accountInfo] = await Promise.all([
+  synapse.payments.serviceApproval(warmStorageAddress),
+  synapse.payments.accountInfo(TOKENS.USDFC),
+]);
+
+// Calculate cumulative allowances: existing usage + new requirements
+// This ensures the operator can spend for ALL your datasets
+const lockupAllowanceNeeded = approval.lockupUsed + lockupNeeded;
+const rateAllowanceNeeded = approval.rateUsed + pricePerEpoch;
+
+console.log("New lockup needed:", lockupNeeded);
+console.log("Cumulative lockup allowance needed:", lockupAllowanceNeeded);
+console.log("Cumulative rate allowance needed:", rateAllowanceNeeded);
+```
+
+### Step 3: Fund Your Account
+
+Check balances, calculate deposit amount, and execute the appropriate transaction:
+
+```ts twoslash
+import { Synapse, TOKENS, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+const synapse = await Synapse.create({});
+const warmStorageAddress = await synapse.getWarmStorageAddress();
+const totalCostNeeded = null as unknown as bigint;
+const rateAllowanceNeeded = null as unknown as bigint;
+const lockupAllowanceNeeded = null as unknown as bigint;
+const approval = await synapse.payments.serviceApproval(warmStorageAddress);
+const accountInfo = await synapse.payments.accountInfo(TOKENS.USDFC);
+// ---cut---
+// Calculate deposit amount needed
+const depositAmountNeeded =
+  totalCostNeeded > accountInfo.availableFunds
+    ? totalCostNeeded - accountInfo.availableFunds
+    : 0n;
+
+// Check if allowances are sufficient
+const sufficient =
+  rateAllowanceNeeded <= approval.rateAllowance &&
+  lockupAllowanceNeeded <= approval.lockupAllowance;
+
+// Verify wallet balance
+const walletBalance = await synapse.payments.walletBalance(TOKENS.USDFC);
+if (walletBalance < depositAmountNeeded) {
+  throw new Error("Insufficient USDFC balance in wallet");
+}
+
+// Execute appropriate transaction
+if (!sufficient && depositAmountNeeded > 0n) {
+  // Need both deposit and approval
+  await synapse.payments.depositWithPermitAndApproveOperator(
+    depositAmountNeeded,
+    warmStorageAddress,
+    rateAllowanceNeeded,
+    lockupAllowanceNeeded,
+    TIME_CONSTANTS.EPOCHS_PER_MONTH
+  );
+} else if (!sufficient) {
+  // Only need approval update
+  await synapse.payments.approveService(
+    warmStorageAddress,
+    rateAllowanceNeeded,
+    lockupAllowanceNeeded,
+    TIME_CONSTANTS.EPOCHS_PER_MONTH
+  );
+} else if (depositAmountNeeded > 0n) {
+  // Only need deposit
+  await synapse.payments.depositWithPermit(
+    depositAmountNeeded,
+    warmStorageAddress
+  );
+}
+
+console.log("Account funded successfully");
+```
+
+## Next Steps
+
+- [Storage Operations](/developer-guides/storage/) - Storage concepts and workflows
+- [Storage Context](/developer-guides/storage/storage-context/) - Contexts and data sets

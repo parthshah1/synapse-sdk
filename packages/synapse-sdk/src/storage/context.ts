@@ -22,7 +22,7 @@
  * ```
  */
 
-import * as Piece from '@filoz/synapse-core/piece'
+import { asPieceCID } from '@filoz/synapse-core/piece'
 import * as SP from '@filoz/synapse-core/sp'
 import { randIndex, randU256 } from '@filoz/synapse-core/utils'
 import type { ethers } from 'ethers'
@@ -30,7 +30,6 @@ import type { Hex } from 'viem'
 import type { PaymentsService } from '../payments/index.ts'
 import { PDPAuthHelper, PDPServer } from '../pdp/index.ts'
 import { PDPVerifier } from '../pdp/verifier.ts'
-import { asPieceCID } from '../piece/index.ts'
 import { SPRegistryService } from '../sp-registry/index.ts'
 import type { ProviderInfo } from '../sp-registry/types.ts'
 import type { Synapse } from '../synapse.ts'
@@ -835,30 +834,39 @@ export class StorageContext {
 
   /**
    * Upload data to the service provider
+   *
+   * Accepts Uint8Array or ReadableStream<Uint8Array>.
+   * For large files, prefer streaming to minimize memory usage.
+   *
+   * Note: When uploading to multiple contexts, pieceCid should be pre-calculated and passed in options
+   * to avoid redundant computation. For streaming uploads, pieceCid must be provided in options as it
+   * cannot be calculated without consuming the stream.
    */
-  async upload(data: Uint8Array | ArrayBuffer, options?: UploadOptions, pieceCid?: PieceCID): Promise<UploadResult> {
+  async upload(data: Uint8Array | ReadableStream<Uint8Array>, options?: UploadOptions): Promise<UploadResult> {
     performance.mark('synapse:upload-start')
 
-    // Validation Phase: Check data size
-    const dataBytes: Uint8Array = data instanceof ArrayBuffer ? new Uint8Array(data) : data
-    const size = dataBytes.length
-
-    // Validate size before proceeding
-    StorageContext.validateRawSize(size, 'upload')
-
-    if (pieceCid == null) {
-      pieceCid = Piece.calculate(dataBytes)
+    // Validation Phase: Check data size and calculate pieceCid
+    let size: number | undefined
+    const pieceCid = options?.pieceCid
+    if (data instanceof Uint8Array) {
+      size = data.length
+      StorageContext.validateRawSize(size, 'upload')
     }
+    // Note: Size is unknown for streams (size will be undefined)
 
     // Track this upload for batching purposes
     const uploadId = Symbol('upload')
     this._activeUploads.add(uploadId)
 
     try {
-      // Upload Phase: Upload data to service provider and agree on PieceCID
+      let uploadResult: SP.UploadPieceResponse
+      // Upload Phase: Upload data to service provider
       try {
         performance.mark('synapse:pdpServer.uploadPiece-start')
-        await this._pdpServer.uploadPiece(dataBytes, pieceCid)
+        uploadResult = await this._pdpServer.uploadPiece(data, {
+          ...options,
+          pieceCid,
+        })
         performance.mark('synapse:pdpServer.uploadPiece-end')
         performance.measure(
           'synapse:pdpServer.uploadPiece',
@@ -877,7 +885,7 @@ export class StorageContext {
 
       // Poll for piece to be "parked" (ready)
       performance.mark('synapse:findPiece-start')
-      await this._pdpServer.findPiece(pieceCid)
+      await this._pdpServer.findPiece(uploadResult.pieceCid)
       performance.mark('synapse:findPiece-end')
       performance.measure('synapse:findPiece', 'synapse:findPiece-start', 'synapse:findPiece-end')
 
@@ -886,7 +894,7 @@ export class StorageContext {
 
       // Notify upload complete
       if (options?.onUploadComplete != null) {
-        options.onUploadComplete(pieceCid)
+        options.onUploadComplete(uploadResult.pieceCid)
       }
 
       // Add Piece Phase: Queue the AddPieces operation for sequential processing
@@ -899,7 +907,7 @@ export class StorageContext {
       const finalPieceId = await new Promise<number>((resolve, reject) => {
         // Add to pending batch
         this._pendingPieces.push({
-          pieceCid,
+          pieceCid: uploadResult.pieceCid,
           resolve,
           reject,
           callbacks: options,
@@ -919,8 +927,8 @@ export class StorageContext {
       performance.mark('synapse:upload-end')
       performance.measure('synapse:upload', 'synapse:upload-start', 'synapse:upload-end')
       return {
-        pieceCid,
-        size,
+        pieceCid: uploadResult.pieceCid,
+        size: uploadResult.size,
         pieceId: finalPieceId,
       }
     } finally {
@@ -1188,11 +1196,11 @@ export class StorageContext {
       offset += batchSize
     }
   }
-  private async _getPieceIdByCID(pieceCID: string | PieceCID): Promise<number> {
+  private async _getPieceIdByCID(pieceCid: string | PieceCID): Promise<number> {
     if (this.dataSetId == null) {
       throw createError('StorageContext', 'getPieceIdByCID', 'Data set not found')
     }
-    const parsedPieceCID = asPieceCID(pieceCID)
+    const parsedPieceCID = asPieceCID(pieceCid)
     if (parsedPieceCID == null) {
       throw createError('StorageContext', 'deletePiece', 'Invalid PieceCID provided')
     }

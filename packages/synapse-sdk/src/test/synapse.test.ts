@@ -15,18 +15,19 @@ import { PaymentsService } from '../payments/index.ts'
 import { PDP_PERMISSIONS } from '../session/key.ts'
 import type { StorageContext } from '../storage/context.ts'
 import { Synapse } from '../synapse.ts'
-import type { UploadResult } from '../types.ts'
+import { SIZE_CONSTANTS } from '../utils/constants.ts'
 import { makeDataSetCreatedLog } from './mocks/events.ts'
 import { ADDRESSES, JSONRPC, PRIVATE_KEYS, PROVIDERS, presets } from './mocks/jsonrpc/index.ts'
 import { mockServiceProviderRegistry } from './mocks/jsonrpc/service-registry.ts'
 import {
   createAndAddPiecesHandler,
   dataSetCreationStatusHandler,
+  finalizePieceUploadHandler,
   findPieceHandler,
   type PDPMockOptions,
   pieceAdditionStatusHandler,
-  postPieceHandler,
-  uploadPieceHandler,
+  postPieceUploadsHandler,
+  uploadPieceStreamingHandler,
 } from './mocks/pdp/handlers.ts'
 import { PING } from './mocks/ping.ts'
 
@@ -604,7 +605,7 @@ describe('Synapse', () => {
       assert.equal(storageInfo.serviceParameters.epochsPerDay, 2880n)
       assert.equal(storageInfo.serviceParameters.epochDuration, 30)
       assert.equal(storageInfo.serviceParameters.minUploadSize, 127)
-      assert.equal(storageInfo.serviceParameters.maxUploadSize, 200 * 1024 * 1024)
+      assert.equal(storageInfo.serviceParameters.maxUploadSize, SIZE_CONSTANTS.MAX_UPLOAD_SIZE)
 
       // Check allowances (including operator approval flag)
       assert.exists(storageInfo.allowances)
@@ -938,6 +939,10 @@ describe('Synapse', () => {
       assert.equal((contexts[0] as any)._dataSetId, undefined)
       assert.equal((contexts[1] as any)._dataSetId, undefined)
       assert.notEqual(contexts[0].provider.id, contexts[1].provider.id)
+
+      // should return the same contexts when invoked again
+      const defaultContexts = await synapse.storage.createContexts()
+      assert.isTrue(defaultContexts === contexts)
     })
 
     it('can attempt to create numerous contexts, returning fewer', async () => {
@@ -978,16 +983,17 @@ describe('Synapse', () => {
       })
 
       it('succeeds for ArrayBuffer data when upload found', async () => {
-        const data = new ArrayBuffer(1024)
-        const pieceCid = Piece.calculate(new Uint8Array(data))
+        const data = new Uint8Array(1024)
+        const pieceCid = Piece.calculate(data)
         const mockUUID = '12345678-90ab-cdef-1234-567890abcdef'
         const found = true
         for (const provider of [PROVIDERS.provider1, PROVIDERS.provider2]) {
           const pdpOptions = {
             baseUrl: provider.products[0].offering.serviceURL,
           }
-          server.use(postPieceHandler(pieceCid.toString(), mockUUID, pdpOptions))
-          server.use(uploadPieceHandler(mockUUID, pdpOptions))
+          server.use(postPieceUploadsHandler(mockUUID, pdpOptions))
+          server.use(uploadPieceStreamingHandler(mockUUID, pdpOptions))
+          server.use(finalizePieceUploadHandler(mockUUID, pieceCid.toString(), pdpOptions))
           server.use(findPieceHandler(pieceCid.toString(), found, pdpOptions))
           server.use(createAndAddPiecesHandler(FAKE_TX_HASH, pdpOptions))
           server.use(
@@ -1007,19 +1013,14 @@ describe('Synapse', () => {
             )
           )
         }
-        const results = await synapse.storage.upload(data, { contexts })
-        assert.equal(results.length, contexts.length)
-        for (let i = 0; i < results.length; i++) {
-          assert.equal(results[i].status, 'fulfilled')
-          const value = (results[i] as PromiseFulfilledResult<UploadResult>).value
-          assert.equal(value.pieceCid.toString(), pieceCid.toString())
-          assert.equal(value.size, 1024)
-        }
+        const result = await synapse.storage.upload(data, { contexts })
+        assert.equal(result.pieceCid.toString(), pieceCid.toString())
+        assert.equal(result.size, 1024)
       })
 
-      it('handles when one storage provider fails to create an upload session', async () => {
-        const data = new ArrayBuffer(1024)
-        const pieceCid = Piece.calculate(new Uint8Array(data))
+      it('fails when one storage provider returns wrong pieceCid', async () => {
+        const data = new Uint8Array(1024)
+        const pieceCid = Piece.calculate(data)
         const mockUUID = '12345678-90ab-cdef-1234-567890abcdef'
         const found = true
         const wrongCid = 'wrongCid'
@@ -1027,10 +1028,15 @@ describe('Synapse', () => {
           const pdpOptions = {
             baseUrl: provider.products[0].offering.serviceURL,
           }
+          server.use(postPieceUploadsHandler(mockUUID, pdpOptions))
+          server.use(uploadPieceStreamingHandler(mockUUID, pdpOptions))
           server.use(
-            postPieceHandler(provider === PROVIDERS.provider1 ? pieceCid.toString() : wrongCid, mockUUID, pdpOptions)
+            finalizePieceUploadHandler(
+              mockUUID,
+              provider === PROVIDERS.provider1 ? pieceCid.toString() : wrongCid,
+              pdpOptions
+            )
           )
-          server.use(uploadPieceHandler(mockUUID, pdpOptions))
           server.use(findPieceHandler(pieceCid.toString(), found, pdpOptions))
           server.use(createAndAddPiecesHandler(FAKE_TX_HASH, pdpOptions))
           server.use(
@@ -1050,15 +1056,12 @@ describe('Synapse', () => {
             )
           )
         }
-        const results = await synapse.storage.upload(data, { contexts })
-        assert.equal(results.length, contexts.length)
-        assert.equal(results[0].status, 'fulfilled')
-        const value0 = (results[0] as PromiseFulfilledResult<UploadResult>).value
-        assert.equal(value0.pieceCid.toString(), pieceCid.toString())
-        assert.equal(value0.size, 1024)
-        assert.equal(results[1].status, 'rejected')
-        const reason1 = (results[1] as PromiseRejectedResult).reason
-        assert.include(reason1.message, wrongCid)
+        try {
+          await synapse.storage.upload(data, { contexts })
+          assert.fail('Expected upload to fail when one provider returns wrong pieceCid')
+        } catch (error: any) {
+          assert.include(error.message, wrongCid)
+        }
       })
     })
   })

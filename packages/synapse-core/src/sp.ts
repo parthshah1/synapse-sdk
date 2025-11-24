@@ -41,6 +41,58 @@ export function setTimeout(timeout: number) {
 }
 
 /**
+ * Convert AsyncIterable to ReadableStream with broad browser compatibility.
+ * Provides fallback for environments where ReadableStream.from() is not available.
+ *
+ * Uses pull-based streaming to implement proper backpressure and ensure all
+ * chunks are consumed in order.
+ */
+function asyncIterableToReadableStream(iterable: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+  if (!isAsyncIterable(iterable)) {
+    throw new Error('Input must be an AsyncIterable')
+  }
+
+  // Use native ReadableStream.from() if available
+  // See https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/from_static for latest
+  // support matrix, as of late 2025 this is still "Experimental"
+  if (typeof ReadableStream.from === 'function') {
+    return ReadableStream.from(iterable)
+  }
+
+  // Fallback implementation using pull-based streaming
+  const iterator = iterable[Symbol.asyncIterator]()
+
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        const { value, done } = await iterator.next()
+        if (done) {
+          controller.close()
+        } else {
+          controller.enqueue(value)
+        }
+      } catch (error) {
+        // run cleanup on internal errors
+        if (iterator.return) {
+          try {
+            await iterator.return()
+          } catch {
+            // safely ignore
+          }
+        }
+        controller.error(error)
+      }
+    },
+    async cancel() {
+      // Clean up iterator if stream is cancelled
+      if (iterator.return) {
+        await iterator.return()
+      }
+    },
+  })
+}
+
+/**
  * The options for the create data set on PDP API.
  *
  * @param endpoint - The endpoint of the PDP API.
@@ -384,6 +436,167 @@ export async function uploadPiece(options: UploadPieceOptions): Promise<void> {
   }
 }
 
+export type UploadPieceStreamingOptions = {
+  endpoint: string
+  data: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>
+  size?: number
+  onProgress?: (bytesUploaded: number) => void
+  pieceCid?: PieceCID
+  signal?: AbortSignal
+}
+
+/**
+ * Upload piece data using the 3-step CommP-last streaming protocol.
+ *
+ * Protocol:
+ * 1. POST /pdp/piece/uploads → get upload session UUID
+ * 2. PUT /pdp/piece/uploads/{uuid} → stream data while calculating CommP
+ * 3. POST /pdp/piece/uploads/{uuid} → finalize with calculated CommP
+ *
+ * @param options - Upload options
+ * @param options.endpoint - The endpoint of the PDP API
+ * @param options.data - AsyncIterable or ReadableStream yielding Uint8Array chunks
+ * @param options.size - Optional known size for Content-Length header
+ * @param options.onProgress - Optional progress callback
+ * @param options.signal - Optional AbortSignal to cancel the upload
+ * @returns PieceCID and size of uploaded data
+ * @throws Error if upload fails at any step or if size exceeds MAX_UPLOAD_SIZE
+ */
+export async function uploadPieceStreaming(options: UploadPieceStreamingOptions): Promise<UploadPieceResponse> {
+  // Create upload session (POST /pdp/piece/uploads)
+  const createResponse = await request.post(new URL('pdp/piece/uploads', options.endpoint), {
+    timeout: TIMEOUT,
+    signal: options.signal,
+  })
+
+  if (createResponse.error) {
+    if (HttpError.is(createResponse.error)) {
+      throw new PostPieceError(`Failed to create upload session: ${await createResponse.error.response.text()}`)
+    }
+    throw createResponse.error
+  }
+
+  if (createResponse.result.status !== 201) {
+    throw new PostPieceError(`Expected 201 Created, got ${createResponse.result.status}`)
+  }
+
+  // Extract UUID from Location header: /pdp/piece/uploads/{uuid}
+  const location = createResponse.result.headers.get('Location')
+  if (!location) {
+    throw new LocationHeaderError('Upload session created but Location header missing')
+  }
+
+  const locationMatch = location.match(/\/pdp\/piece\/uploads\/([a-fA-F0-9-]+)/)
+  if (!locationMatch) {
+    throw new LocationHeaderError(`Invalid Location header format: ${location}`)
+  }
+
+  const uploadUuid = locationMatch[1]
+
+  // Create CommP calculator stream only if PieceCID not provided
+  let getPieceCID: () => PieceCID | null = () => options.pieceCid ?? null
+  let pieceCidStream: TransformStream<Uint8Array, Uint8Array> | null = null
+
+  if (options.pieceCid == null) {
+    const result = Piece.createPieceCIDStream()
+    pieceCidStream = result.stream
+    getPieceCID = result.getPieceCID
+  }
+
+  // Convert to ReadableStream if needed (skip if already ReadableStream)
+  const dataStream = asReadableStream(options.data)
+
+  // Add size tracking and progress reporting
+  let bytesUploaded = 0
+  const trackingStream = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      bytesUploaded += chunk.length
+
+      // Check size limit
+      if (bytesUploaded > Piece.MAX_UPLOAD_SIZE) {
+        throw new InvalidUploadSizeError(bytesUploaded)
+      }
+
+      // Report progress if callback provided
+      if (options.onProgress) {
+        options.onProgress(bytesUploaded)
+      }
+
+      controller.enqueue(chunk)
+    },
+  })
+
+  // Chain streams: data → tracking → CommP calculation (if needed)
+  const bodyStream = pieceCidStream
+    ? dataStream.pipeThrough(trackingStream).pipeThrough(pieceCidStream)
+    : dataStream.pipeThrough(trackingStream)
+
+  // PUT /pdp/piece/uploads/{uuid} with streaming body
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+  }
+
+  // Add Content-Length if size is known (recommended for server)
+  if (options.size !== undefined) {
+    headers['Content-Length'] = options.size.toString()
+  }
+
+  const uploadResponse = await request.put(new URL(`pdp/piece/uploads/${uploadUuid}`, options.endpoint), {
+    body: bodyStream,
+    headers,
+    timeout: false, // No timeout for streaming upload
+    signal: options.signal,
+    duplex: 'half', // Required for streaming request bodies
+  } as Parameters<typeof request.put>[1] & { duplex: 'half' })
+
+  if (uploadResponse.error) {
+    if (HttpError.is(uploadResponse.error)) {
+      throw new UploadPieceError(`Failed to upload piece: ${await uploadResponse.error.response.text()}`)
+    }
+    throw uploadResponse.error
+  }
+
+  if (uploadResponse.result.status !== 204) {
+    throw new UploadPieceError(`Expected 204 No Content, got ${uploadResponse.result.status}`)
+  }
+
+  // Get PieceCID (either provided or calculated) and finalize
+  const pieceCid = getPieceCID()
+  if (pieceCid === null) {
+    throw new Error('Failed to calculate PieceCID during upload')
+  }
+
+  const finalizeBody = JSON.stringify({
+    pieceCid: pieceCid.toString(),
+  })
+
+  // POST /pdp/piece/uploads/{uuid} with PieceCID
+  const finalizeResponse = await request.post(new URL(`pdp/piece/uploads/${uploadUuid}`, options.endpoint), {
+    body: finalizeBody,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    timeout: TIMEOUT,
+    signal: options.signal,
+  })
+
+  if (finalizeResponse.error) {
+    if (HttpError.is(finalizeResponse.error)) {
+      throw new PostPieceError(`Failed to finalize upload: ${await finalizeResponse.error.response.text()}`)
+    }
+    throw finalizeResponse.error
+  }
+
+  if (finalizeResponse.result.status !== 200) {
+    throw new PostPieceError(`Expected 200 OK for finalization, got ${finalizeResponse.result.status}`)
+  }
+
+  return {
+    pieceCid,
+    size: bytesUploaded,
+  }
+}
+
 export type FindPieceOptions = {
   endpoint: string
   pieceCid: PieceCID
@@ -591,4 +804,41 @@ export async function ping(endpoint: string) {
     throw new Error('Ping failed')
   }
   return response.result
+}
+
+/**
+ * Type guard to check if a value is a ReadableStream
+ * @param value - The value to check
+ * @returns True if it's a ReadableStream
+ */
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'getReader' in value &&
+    typeof (value as ReadableStream<Uint8Array>).getReader === 'function'
+  )
+}
+
+/**
+ * Convert AsyncIterable or ReadableStream to ReadableStream
+ * @param data - AsyncIterable or ReadableStream to convert
+ * @returns ReadableStream
+ */
+function asReadableStream(data: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  return isReadableStream(data) ? data : asyncIterableToReadableStream(data)
+}
+
+/**
+ * Type guard to check if a value is an AsyncIterable
+ * @param value - The value to check
+ * @returns True if it's an AsyncIterable
+ */
+function isAsyncIterable(value: unknown): value is AsyncIterable<Uint8Array> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof (value as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function'
+  )
 }

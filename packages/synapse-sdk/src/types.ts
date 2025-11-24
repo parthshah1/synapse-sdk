@@ -5,9 +5,9 @@
  * used throughout the SDK. Concrete classes are defined in their own files.
  */
 
+import type { PieceCID } from '@filoz/synapse-core/piece'
 import type { ethers } from 'ethers'
 import type { Hex } from 'viem'
-import type { PieceCID } from './piece/index.ts'
 import type { ProviderInfo } from './sp-registry/types.ts'
 import type { TelemetryConfig } from './telemetry/service.ts'
 
@@ -416,6 +416,8 @@ export interface PreflightInfo {
  * 3. Confirmation (transaction confirmed on-chain)
  */
 export interface UploadCallbacks {
+  /** Called periodically during upload with bytes uploaded so far */
+  onProgress?: (bytesUploaded: number) => void
   /** Called when upload to service provider completes */
   onUploadComplete?: (pieceCid: PieceCID) => void
   /** Called when the service provider has added the piece and submitted the transaction to the chain */
@@ -433,6 +435,10 @@ export interface UploadCallbacks {
 export interface UploadOptions extends UploadCallbacks {
   /** Custom metadata for this specific piece (key-value pairs) */
   metadata?: Record<string, string>
+  /** Optional pre-calculated PieceCID to skip CommP calculation (BYO PieceCID) */
+  pieceCid?: PieceCID
+  /** Optional AbortSignal to cancel the upload */
+  signal?: AbortSignal
 }
 
 /**
