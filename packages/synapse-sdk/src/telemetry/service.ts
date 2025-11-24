@@ -13,13 +13,8 @@
  * ```
  */
 
-// Sentry types - optional dependency, may not be available at compile time
-// When Sentry isn't installed, these types are `any` to allow compilation
-// The actual types are used when Sentry is available at runtime
-type BrowserOptions = any // @sentry/browser types when available
-type ErrorEvent = any // @sentry/browser types when available
-type EventHint = any // @sentry/browser types when available
-type NodeOptions = any // @sentry/node types when available
+import type { BrowserOptions, ErrorEvent, EventHint } from '@sentry/browser'
+import type { NodeOptions } from '@sentry/node'
 import type { FilecoinNetworkType } from '../types.ts'
 import { SDK_VERSION } from '../utils/sdk-version.ts'
 import {
@@ -107,9 +102,8 @@ export class TelemetryService {
       )
     }
 
-    const globalTags: Record<string, string> = {
-      // get any tags consumers want to set
-      ...(config.sentrySetTags && typeof config.sentrySetTags === 'object' ? config.sentrySetTags : {}),
+    const globalTags = {
+      ...config.sentrySetTags, // get any tags consumers want to set
 
       // things that consumers should not need, nor be able, to override
       filecoinNetwork: context.filecoinNetwork, // The network (mainnet/calibration) that the synapse-sdk is being used in.
@@ -186,7 +180,7 @@ export class TelemetryService {
   ): SentryBeforeSendSpanFunction {
     const httpVerbPattern = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT)\s/i
 
-    return ((span: any) => {
+    return ((span) => {
       // Call user-provided beforeSendSpan first, if it exists
       let modifiedSpan = span
       if (config.sentryInitOptions?.beforeSendSpan != null) {
