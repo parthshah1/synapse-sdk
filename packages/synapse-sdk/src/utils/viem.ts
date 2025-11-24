@@ -35,9 +35,9 @@ export async function providerToClient(provider: ethers.Provider): Promise<Clien
   }
 
   return createClient({
-    chain: chain as Chain,
+    chain,
     transport,
-  }) as Client<Transport, Chain>
+  })
 }
 
 export async function signerToConnectorClient(
@@ -79,8 +79,8 @@ export async function signerToConnectorClient(
   }
 
   return createWalletClient({
-    chain: chain as Chain,
+    chain,
     transport,
     account,
-  }) as Client<Transport, Chain, Account>
+  })
 }
