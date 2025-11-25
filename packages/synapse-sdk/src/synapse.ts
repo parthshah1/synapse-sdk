@@ -29,7 +29,6 @@ import {
   getFilecoinNetworkType,
   queryGenesisTimestamp,
 } from './utils/index.ts'
-import { ProviderResolver } from './utils/provider-resolver.ts'
 import { WarmStorageService } from './warm-storage/index.ts'
 
 export class Synapse {
@@ -540,7 +539,6 @@ export class Synapse {
       // Create SPRegistryService
       const registryAddress = this._warmStorageService.getServiceProviderRegistryAddress()
       const spRegistry = new SPRegistryService(this._provider, registryAddress, this._multicall3Address)
-      const resolver = new ProviderResolver(this._warmStorageService, spRegistry)
 
       let providerInfo: ProviderInfo | null
       if (typeof providerAddress === 'string') {

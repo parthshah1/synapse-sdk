@@ -230,21 +230,16 @@ export type PDPCreateDataSetAndAddPiecesOptions = {
  * @returns The response from the create data set and add pieces to it on PDP API.
  */
 export async function createDataSetAndAddPieces(options: PDPCreateDataSetAndAddPiecesOptions) {
-  // Prepare request body
-  const requestBody = {
-    recordKeeper: options.recordKeeper,
-    extraData: options.extraData,
-    pieces: options.pieces.map((piece) => ({
-      pieceCid: piece.toString(),
-      subPieces: [{ subPieceCid: piece.toString() }],
-    })),
-  }
-  
-  const requestUrl = new URL(`pdp/data-sets/create-and-add`, options.endpoint)
-  
   // Send the create data set message to the PDP
-  const response = await request.post(requestUrl, {
-    body: JSON.stringify(requestBody),
+  const response = await request.post(new URL(`pdp/data-sets/create-and-add`, options.endpoint), {
+    body: JSON.stringify({
+      recordKeeper: options.recordKeeper,
+      extraData: options.extraData,
+      pieces: options.pieces.map((piece) => ({
+        pieceCid: piece.toString(),
+        subPieces: [{ subPieceCid: piece.toString() }],
+      })),
+    }),
     headers: {
       'Content-Type': 'application/json',
     },

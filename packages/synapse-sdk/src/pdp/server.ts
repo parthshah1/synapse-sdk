@@ -281,13 +281,11 @@ export class PDPServer {
     const abiCoder = ethers.AbiCoder.defaultAbiCoder()
     const encoded = abiCoder.encode(['bytes', 'bytes'], [`0x${createExtraData}`, `0x${addExtraData}`])
 
-    const pieces = pieceDataArray.map(asPieceCID).filter((t) => t != null)
-
     return SP.createDataSetAndAddPieces({
       endpoint: this._serviceURL,
       recordKeeper: recordKeeper as Hex,
       extraData: encoded as Hex,
-      pieces,
+      pieces: pieceDataArray.map(asPieceCID).filter((t) => t != null),
     })
   }
 

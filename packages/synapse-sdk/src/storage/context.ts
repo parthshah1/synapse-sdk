@@ -66,7 +66,6 @@ export class StorageContext {
   private readonly _provider: ProviderInfo
   private readonly _pdpServer: PDPServer
   private readonly _warmStorageService: WarmStorageService
-  private readonly _warmStorageAddress: string
   private readonly _withCDN: boolean
   private readonly _signer: ethers.Signer
   private readonly _uploadBatchSize: number
@@ -165,11 +164,10 @@ export class StorageContext {
     this._dataSetId = dataSetId
     this.serviceProvider = provider.serviceProvider
 
-    // Get WarmStorage address from Synapse (which already handles override)
-    this._warmStorageAddress = synapse.getWarmStorageAddress()
+  this._warmStorageService = warmStorageService
 
-    // Create PDPAuthHelper for signing operations
-    const authHelper = new PDPAuthHelper(this._warmStorageAddress, this._signer, BigInt(synapse.getChainId()))
+  // Create PDPAuthHelper for signing operations
+  const authHelper = new PDPAuthHelper(synapse.getWarmStorageAddress(), this._signer, BigInt(synapse.getChainId()))
 
     // Create PDPServer instance with provider URL from PDP product
     if (!provider.products.PDP?.data.serviceURL) {
