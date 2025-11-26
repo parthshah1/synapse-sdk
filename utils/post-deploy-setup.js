@@ -81,7 +81,7 @@
  *
  * - WARM_STORAGE_CONTRACT_ADDRESS: Warm Storage address (defaults to address in constants.ts for network)
  * - SP_REGISTRY_ADDRESS: ServiceProviderRegistry address (auto-discovered from WarmStorage if not provided)
- * - NETWORK: Either 'mainnet', 'calibration', or 'devnet' (default: calibration)
+ * - NETWORK: Either 'mainnet' or 'calibration' (default: calibration)
  * - RPC_URL: Custom RPC endpoint (overrides default network RPC)
  * - SP_NAME: Provider name (default: "Test Service Provider")
  * - SP_DESCRIPTION: Provider description (default: "Test provider for Warm Storage")
@@ -93,11 +93,10 @@
  */
 
 import { ethers } from 'ethers'
-import { PaymentsService } from '../packages/synapse-sdk/dist/src/payments/service.js'
-import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/service.js'
-import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
-import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/service.js'
-import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
+import { PaymentsService } from '../packages/synapse-sdk/src/payments/service.ts'
+import { SPRegistryService } from '../packages/synapse-sdk/src/sp-registry/service.ts'
+import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/src/utils/constants.ts'
+import { WarmStorageService } from '../packages/synapse-sdk/src/warm-storage/service.ts'
 
 // Constants for payment approvals
 const RATE_ALLOWANCE_PER_EPOCH = ethers.parseUnits('0.1', 18) // 0.1 USDFC per epoch
@@ -219,9 +218,6 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
     const contract = spRegistry._getRegistryContract().connect(spSigner)
     const registrationFee = await contract.REGISTRATION_FEE()
 
-    // Convert monthly price to daily price (divide by ~30 days)
-    const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
-
     // Encode PDP offering for initial registration
     const pdpOffering = {
       serviceURL: spServiceUrl,
@@ -229,14 +225,13 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       maxPieceSizeInBytes: maxPieceSize,
       ipniPiece: false,
       ipniIpfs: false,
-      storagePricePerTibPerDay: storagePricePerTibPerDay,
+      storagePricePerTibPerMonth,
       minProvingPeriodInEpochs: minProvingPeriod,
-      location: location || 'C=US;ST=Unknown;L=Unknown', // Ensure non-empty location
+      location,
       paymentTokenAddress: '0x0000000000000000000000000000000000000000',
     }
 
-    // Encode PDP offering into capability keys and values
-    const [pdpCapabilityKeys, pdpCapabilityValues] = encodePDPCapabilities(pdpOffering, {})
+    const encodedOffering = await spRegistry.encodePDPOffering(pdpOffering)
 
     // Register with PDP product included
     // Use the SP's address as both serviceProvider (msg.sender) and payee
@@ -245,8 +240,9 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       spName,
       spDescription,
       0, // ProductType.PDP
-      pdpCapabilityKeys,
-      pdpCapabilityValues,
+      encodedOffering,
+      location ? ['location'] : [], // capability keys
+      location ? [location] : [], // capability values
       { value: registrationFee }
     )
 
@@ -270,26 +266,15 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       success('Provider has active PDP product')
       log(`  Service URL: ${pdpService.offering.serviceURL}`)
       log(`  Location: ${pdpService.offering.location}`)
-      // Display price (handle both per-month and per-day formats)
-      const displayedPrice = pdpService.offering.storagePricePerTibPerDay 
-        ? ethers.formatUnits(pdpService.offering.storagePricePerTibPerDay * TIME_CONSTANTS.DAYS_PER_MONTH, 18)
-        : (pdpService.offering.storagePricePerTibPerMonth 
-          ? ethers.formatUnits(pdpService.offering.storagePricePerTibPerMonth, 18)
-          : 'N/A')
-      log(`  Storage Price: ${displayedPrice} USDFC/TiB/month`)
+      log(`  Storage Price: ${ethers.formatUnits(pdpService.offering.storagePricePerTibPerMonth, 18)} USDFC/TiB/month`)
       log(`  Min Piece Size: ${pdpService.offering.minPieceSizeInBytes} bytes`)
       log(`  Max Piece Size: ${pdpService.offering.maxPieceSizeInBytes} bytes`)
-
-      // Convert monthly price to daily price for comparison
-      const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
-      const currentPricePerDay = pdpService.offering.storagePricePerTibPerDay || (pdpService.offering.storagePricePerTibPerMonth ? pdpService.offering.storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH : 0n)
-      const normalizedLocation = location || 'C=US;ST=Unknown;L=Unknown'
 
       // Check if we need to update the product
       if (
         pdpService.offering.serviceURL !== spServiceUrl ||
-        pdpService.offering.location !== normalizedLocation ||
-        currentPricePerDay !== storagePricePerTibPerDay
+        pdpService.offering.location !== location ||
+        pdpService.offering.storagePricePerTibPerMonth !== storagePricePerTibPerMonth
       ) {
         log('Updating PDP product configuration...')
         const pdpData = {
@@ -298,13 +283,13 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
           maxPieceSizeInBytes: maxPieceSize,
           ipniPiece: false,
           ipniIpfs: false,
-          storagePricePerTibPerDay: storagePricePerTibPerDay,
+          storagePricePerTibPerMonth,
           minProvingPeriodInEpochs: minProvingPeriod,
-          location: normalizedLocation,
+          location,
           paymentTokenAddress: '0x0000000000000000000000000000000000000000',
         }
 
-        const capabilities = {}
+        const capabilities = location ? { location } : {}
         const updateTx = await spRegistry.updatePDPProduct(spSigner, pdpData, capabilities)
         await updateTx.wait(1)
         success(`PDP product updated. Tx: ${updateTx.hash}`)
@@ -313,20 +298,19 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
   } else {
     // This shouldn't happen if registration worked correctly, but handle it just in case
     log('Provider missing PDP product, adding it now...')
-    const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
     const pdpData = {
       serviceURL: spServiceUrl,
       minPieceSizeInBytes: minPieceSize,
       maxPieceSizeInBytes: maxPieceSize,
       ipniPiece: false,
       ipniIpfs: false,
-      storagePricePerTibPerDay: storagePricePerTibPerDay,
+      storagePricePerTibPerMonth,
       minProvingPeriodInEpochs: minProvingPeriod,
-      location: location || 'C=US;ST=Unknown;L=Unknown',
+      location,
       paymentTokenAddress: '0x0000000000000000000000000000000000000000',
     }
 
-    const capabilities = {}
+    const capabilities = location ? { location } : {}
     const addProductTx = await spRegistry.addPDPProduct(spSigner, pdpData, capabilities)
     await addProductTx.wait(1)
     success(`PDP product added. Tx: ${addProductTx.hash}`)
@@ -355,31 +339,14 @@ async function setupClient(clientSigner, provider, warmStorage, warmStorageAddre
   // === Set up client payment approvals ===
   log('\n💰 Client Payment Setup')
 
-  // USDFC token address - use environment variable for devnet, otherwise use network default
-  const currentNetwork = process.env.NETWORK || 'calibration'
-  let usdfcAddress = process.env.USDFC_ADDRESS
-  if (!usdfcAddress) {
-    // For devnet, USDFC_ADDRESS must be provided via environment variable
-    if (currentNetwork === 'devnet') {
-      error('USDFC_ADDRESS environment variable is required for devnet')
-      process.exit(1)
-    }
-    // For mainnet/calibration, use default from constants or hardcoded calibration address
-    usdfcAddress = CONTRACT_ADDRESSES.USDFC?.[currentNetwork] || '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
-  }
+  // USDFC token address on calibration network
+  // This is a standard token address across all deployments
+  const usdfcAddress = '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
   log(`USDFC token address: ${usdfcAddress}`)
 
   // Create PaymentsService
   const paymentsAddress = await warmStorage.getPaymentsAddress()
-  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
-  const paymentsService = new PaymentsService(
-    provider,
-    clientSigner,
-    paymentsAddress,
-    usdfcAddress,
-    false, // disableNonceManager
-    multicall3Address // multicall3Address for devnet
-  )
+  const paymentsService = new PaymentsService(provider, clientSigner, paymentsAddress, usdfcAddress)
 
   // Check client's USDFC balance
   const clientBalance = await paymentsService.walletBalance(TOKENS.USDFC)
@@ -466,8 +433,8 @@ async function main() {
     const customRpcUrl = process.env.RPC_URL
 
     // Validate network
-    if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
-      error('NETWORK must be either "mainnet", "calibration", or "devnet"')
+    if (network !== 'mainnet' && network !== 'calibration') {
+      error('NETWORK must be either "mainnet" or "calibration"')
       process.exit(1)
     }
 
@@ -500,18 +467,7 @@ async function main() {
     provider._getConnection().timeout = 120000 // 2 minutes
 
     // Create WarmStorage service
-    // For devnet, pass runtime addresses from environment variables
-    const multicall3Address = process.env.MULTICALL3_ADDRESS || null
-    const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
-    const warmStorage = await WarmStorageService.create(
-      provider,
-      warmStorageAddress,
-      multicall3Address,
-      warmStorageViewAddress
-    )
-
-    // Store multicall3Address for later use in SPRegistryService
-    const storedMulticall3Address = multicall3Address
+    const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
 
     // Variables to track what was setup
     let providerId = null
@@ -564,8 +520,7 @@ async function main() {
       }
 
       // Create registry service
-      // For devnet, pass multicall3Address if available
-      const spRegistry = new SPRegistryService(provider, spRegistryAddress, storedMulticall3Address)
+      const spRegistry = new SPRegistryService(provider, spRegistryAddress)
 
       // Setup provider
       const config = {

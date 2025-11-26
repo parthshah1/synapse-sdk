@@ -10,9 +10,9 @@
  */
 
 import { ethers } from 'ethers'
-import { SETTLEMENT_FEE, Synapse } from '../packages/synapse-sdk/dist/src/index.js'
-import { getCurrentEpoch } from '../packages/synapse-sdk/dist/src/utils/index.js'
-import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/index.js'
+import { SETTLEMENT_FEE, Synapse } from '../packages/synapse-sdk/src/index.ts'
+import { getCurrentEpoch } from '../packages/synapse-sdk/src/utils/index.ts'
+import { WarmStorageService } from '../packages/synapse-sdk/src/warm-storage/index.ts'
 
 // ANSI color codes
 const RESET = '\x1b[0m'

@@ -43,8 +43,8 @@
  *   PRIVATE_KEY=0x... node example-piece-status.js dataset 240 --hide-metadata
  */
 
-import { PDPServer, Synapse, WarmStorageService } from '../packages/synapse-sdk/dist/src/index.js'
-import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/index.js'
+import { PDPServer, Synapse, WarmStorageService } from '../packages/synapse-sdk/src/index.ts'
+import { SPRegistryService } from '../packages/synapse-sdk/src/sp-registry/index.ts'
 
 // Configuration from environment
 const PRIVATE_KEY = process.env.PRIVATE_KEY

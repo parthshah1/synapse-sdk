@@ -27,16 +27,12 @@ import {
   SIZE_CONSTANTS,
   Synapse,
   TIME_CONSTANTS,
-} from '../packages/synapse-sdk/dist/src/index.js'
+} from '../packages/synapse-sdk/src/index.ts'
 
 // Configuration from environment
-const PRIVATE_KEY = process.env.PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+const PRIVATE_KEY = process.env.PRIVATE_KEY
 const RPC_URL = process.env.RPC_URL || 'https://api.calibration.node.glif.io/rpc/v1'
-const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS || process.env.WARM_STORAGE_CONTRACT_ADDRESS // Optional - will use default for network
-const WARM_STORAGE_VIEW_ADDRESS = process.env.WARM_STORAGE_VIEW_ADDRESS // Required for devnet
-const MULTICALL3_ADDRESS = process.env.MULTICALL3_ADDRESS // Required for devnet
-const USDFC_ADDRESS = process.env.USDFC_ADDRESS // Required for devnet
-const GENESIS_TIMESTAMP = process.env.GENESIS_TIMESTAMP ? Number(process.env.GENESIS_TIMESTAMP) : undefined // Optional for devnet
+const WARM_STORAGE_ADDRESS = process.env.WARM_STORAGE_ADDRESS // Optional - will use default for network
 
 function printUsageAndExit() {
   console.error('Usage: PRIVATE_KEY=0x... node example-storage-e2e.js <file-path> [file-path2] ...')
@@ -45,7 +41,7 @@ function printUsageAndExit() {
 
 // Validate inputs
 if (!PRIVATE_KEY) {
-  console.error('ERROR: PRIVATE_KEY or CLIENT_PRIVATE_KEY environment variable is required')
+  console.error('ERROR: PRIVATE_KEY environment variable is required')
   printUsageAndExit()
 }
 
@@ -114,46 +110,13 @@ async function main() {
       console.log(`Warm Storage Address: ${WARM_STORAGE_ADDRESS}`)
     }
 
-    // Add devnet-specific addresses if provided
-    if (MULTICALL3_ADDRESS) {
-      synapseOptions.multicall3Address = MULTICALL3_ADDRESS
-      console.log(`Multicall3 Address: ${MULTICALL3_ADDRESS}`)
-    }
-
-    if (WARM_STORAGE_VIEW_ADDRESS) {
-      synapseOptions.warmStorageViewAddress = WARM_STORAGE_VIEW_ADDRESS
-      console.log(`Warm Storage View Address: ${WARM_STORAGE_VIEW_ADDRESS}`)
-    }
-
-    if (USDFC_ADDRESS) {
-      synapseOptions.usdfcAddress = USDFC_ADDRESS
-      console.log(`USDFC Address: ${USDFC_ADDRESS}`)
-    }
-
-    if (GENESIS_TIMESTAMP !== undefined) {
-      synapseOptions.genesisTimestamp = GENESIS_TIMESTAMP
-      console.log(`Genesis Timestamp: ${GENESIS_TIMESTAMP}`)
-    }
-
     const synapse = await Synapse.create(synapseOptions)
     console.log('✓ Synapse instance created')
-
-    // Log all discovered addresses via Multicall3
-    console.log('\n--- Discovered Contract Addresses (via Multicall3) ---')
-    console.log(`Multicall3 Address: ${synapse.getMulticall3Address()}`)
-    console.log(`Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
-    console.log(`Warm Storage View Address: ${synapse.getWarmStorageViewAddress()}`)
-    console.log(`Payments Address: ${synapse.getPaymentsAddress()}`)
-    console.log(`PDP Verifier Address: ${synapse.getPDPVerifierAddress()}`)
-    console.log(`USDFC Token Address: ${synapse.getUSDFCTokenAddress()}`)
-    console.log(`Service Provider Registry Address: ${synapse.getServiceProviderRegistryAddress()}`)
-    console.log(`Session Key Registry Address: ${synapse.getSessionKeyRegistryAddress()}`)
-    console.log(`FilBeam Beneficiary Address: ${synapse.getFilBeamBeneficiaryAddress()}`)
 
     // Get wallet info
     const signer = synapse.getSigner()
     const address = await signer.getAddress()
-    console.log(`\nWallet address: ${address}`)
+    console.log(`Wallet address: ${address}`)
 
     // Check balances
     console.log('\n--- Checking Balances ---')
@@ -218,7 +181,6 @@ async function main() {
       callbacks: {
         onProviderSelected: (provider) => {
           console.log(`✓ Selected service provider: ${provider.serviceProvider}`)
-          console.log(`  Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
         },
         onDataSetResolved: (info) => {
           if (info.isExisting) {
@@ -252,7 +214,6 @@ async function main() {
       console.log(`Provider Address: ${providerInfo.serviceProvider}`)
       console.log(`Provider Name: ${providerInfo.name}`)
       console.log(`Active: ${providerInfo.active}`)
-      console.log(`Warm Storage Address: ${synapse.getWarmStorageAddress()}`)
       if (providerInfo.products.PDP?.data.serviceURL) {
         console.log(`PDP Service URL: ${providerInfo.products.PDP.data.serviceURL}`)
       }

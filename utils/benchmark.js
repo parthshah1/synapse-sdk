@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { SIZE_CONSTANTS, Synapse } from '../packages/synapse-sdk/dist/src/index.js'
+import { SIZE_CONSTANTS, Synapse } from '../packages/synapse-sdk/src/index.ts'
 
 // Configuration
 const PRIVATE_KEY = process.env.PRIVATE_KEY

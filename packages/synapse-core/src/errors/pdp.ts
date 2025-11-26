@@ -19,7 +19,9 @@ export class CreateDataSetError extends SynapseError {
 
   constructor(error: string) {
     const decodedError = decodePDPError(error)
-    super(`Failed to create data set.`, { details: decodedError })
+    super(`Failed to create data set.`, {
+      details: decodedError,
+    })
   }
 
   static override is(value: unknown): value is CreateDataSetError {
@@ -32,7 +34,9 @@ export class PollDataSetCreationStatusError extends SynapseError {
 
   constructor(error: string) {
     const decodedError = decodePDPError(error)
-    super(`Failed to check data set creation status.`, { details: decodedError })
+    super(`Failed to check data set creation status.`, {
+      details: decodedError,
+    })
   }
 
   static override is(value: unknown): value is PollDataSetCreationStatusError {
@@ -104,7 +108,9 @@ export class AddPiecesError extends SynapseError {
 
   constructor(error: string) {
     const decodedError = decodePDPError(error)
-    super(`Failed to add pieces.`, { details: decodedError })
+    super(`Failed to add pieces.`, {
+      details: decodedError,
+    })
   }
 
   static override is(value: unknown): value is AddPiecesError {

@@ -66,6 +66,7 @@ export class StorageContext {
   private readonly _provider: ProviderInfo
   private readonly _pdpServer: PDPServer
   private readonly _warmStorageService: WarmStorageService
+  private readonly _warmStorageAddress: string
   private readonly _withCDN: boolean
   private readonly _signer: ethers.Signer
   private readonly _uploadBatchSize: number
@@ -164,10 +165,11 @@ export class StorageContext {
     this._dataSetId = dataSetId
     this.serviceProvider = provider.serviceProvider
 
-  this._warmStorageService = warmStorageService
+    // Get WarmStorage address from Synapse (which already handles override)
+    this._warmStorageAddress = synapse.getWarmStorageAddress()
 
-  // Create PDPAuthHelper for signing operations
-  const authHelper = new PDPAuthHelper(synapse.getWarmStorageAddress(), this._signer, BigInt(synapse.getChainId()))
+    // Create PDPAuthHelper for signing operations
+    const authHelper = new PDPAuthHelper(this._warmStorageAddress, this._signer, BigInt(synapse.getChainId()))
 
     // Create PDPServer instance with provider URL from PDP product
     if (!provider.products.PDP?.data.serviceURL) {
@@ -967,6 +969,9 @@ export class StorageContext {
       }
 
       const waited = Date.now() - waitStart
+      if (waited > pollInterval) {
+        console.debug(`Waited ${waited}ms for ${uploadsToWaitFor.size} active upload(s) to complete`)
+      }
     }
 
     // Extract up to uploadBatchSize pending pieces
@@ -982,7 +987,6 @@ export class StorageContext {
           this._warmStorageService.validateDataSet(this.dataSetId),
           this._warmStorageService.getDataSet(this.dataSetId),
         ])
-        
         // Add pieces to the data set
         const addPiecesResult = await this._pdpServer.addPieces(
           this.dataSetId, // PDPVerifier data set ID
@@ -1015,13 +1019,11 @@ export class StorageContext {
         // Convert to MetadataEntry[] for PDP operations (requires ordered array)
         const finalMetadata = objectToEntries(metadataObj)
         // Create a new data set and add pieces to it
-        // Use WarmStorage address as recordKeeper (FWSS contract address)
-        const warmStorageAddress = this._synapse.getWarmStorageAddress()
         const createAndAddPiecesResult = await this._pdpServer.createAndAddPieces(
           randU256(),
           this._provider.payee,
           payer,
-          warmStorageAddress,
+          this._synapse.getWarmStorageAddress(),
           pieceCids,
           {
             dataset: finalMetadata,
@@ -1031,22 +1033,8 @@ export class StorageContext {
         batch.forEach((item) => {
           item.callbacks?.onPieceAdded?.(createAndAddPiecesResult.txHash as Hex)
         })
-        
-        let confirmedDataset
-        try {
-          confirmedDataset = await SP.pollForDataSetCreationStatus(createAndAddPiecesResult)
-          this._dataSetId = confirmedDataset.dataSetId
-        } catch (pollError) {
-          // Wrap polling error with more context
-          if (pollError instanceof Error) {
-            const enhancedError = new Error(
-              `Failed to confirm data set creation. Initial request returned txHash: ${createAndAddPiecesResult.txHash}, statusUrl: ${createAndAddPiecesResult.statusUrl}. Original error: ${pollError.message}`
-            )
-            enhancedError.cause = pollError
-            throw enhancedError
-          }
-          throw pollError
-        }
+        const confirmedDataset = await SP.pollForDataSetCreationStatus(createAndAddPiecesResult)
+        this._dataSetId = confirmedDataset.dataSetId
 
         const confirmedPieces = await SP.pollForAddPiecesStatus({
           statusUrl: new URL(
@@ -1072,19 +1060,7 @@ export class StorageContext {
       })
     } catch (error) {
       // Reject all promises in the batch
-      // Include the original error message for better debugging
-      let errorMessage = 'Failed to add piece to data set'
-      if (error instanceof Error) {
-        // Include the underlying error message if available
-        if (error.message) {
-          errorMessage += ` - ${error.message}`
-        }
-        // Include error details if it's a SynapseError
-        if ('details' in error && error.details) {
-          errorMessage += `\nDetails: ${typeof error.details === 'string' ? error.details : JSON.stringify(error.details)}`
-        }
-      }
-      const finalError = createError('StorageContext', 'addPieces', errorMessage, error)
+      const finalError = createError('StorageContext', 'addPieces', 'Failed to add piece to data set', error)
       batch.forEach((item) => {
         item.reject(finalError)
       })
@@ -1273,7 +1249,8 @@ export class StorageContext {
       // Get data set data
       this._pdpServer
         .getDataSet(this.dataSetId)
-        .catch(() => {
+        .catch((error) => {
+          console.debug('Failed to get data set data:', error)
           return null
         }),
       // Get current epoch
@@ -1363,6 +1340,7 @@ export class StorageContext {
             // 2. Data set is not active
             // In case 1, we might have just proven, so set lastProven to very recent
             // This is a temporary state and should resolve quickly
+            console.debug('Data set has nextChallengeEpoch=0, may have just been proven')
           }
         }
       }
