@@ -93,10 +93,12 @@
  */
 
 import { ethers } from 'ethers'
-import { PaymentsService } from '../packages/synapse-sdk/src/payments/service.ts'
-import { SPRegistryService } from '../packages/synapse-sdk/src/sp-registry/service.ts'
-import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/src/utils/constants.ts'
-import { WarmStorageService } from '../packages/synapse-sdk/src/warm-storage/service.ts'
+import { PaymentsService } from '../packages/synapse-sdk/dist/src/payments/service.js'
+import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/service.js'
+import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS, TOKENS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
+import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/service.js'
+import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
+import { getFilecoinNetworkType } from '../packages/synapse-sdk/dist/src/utils/network.js'
 
 // Constants for payment approvals
 const RATE_ALLOWANCE_PER_EPOCH = ethers.parseUnits('0.1', 18) // 0.1 USDFC per epoch
@@ -104,10 +106,33 @@ const LOCKUP_ALLOWANCE = ethers.parseUnits('10', 18) // 10 USDFC lockup allowanc
 const MAX_LOCKUP_PERIOD = TIME_CONSTANTS.EPOCHS_PER_MONTH // 30 days in epochs (30 * 2880 epochs/day)
 const INITIAL_DEPOSIT_AMOUNT = ethers.parseUnits('1', 18) // 1 USDFC initial deposit
 
-// Default PDP configuration values
-const DEFAULT_STORAGE_PRICE = 5000000000000000000n // 5 USDFC per TiB per month (with 18 decimals)
-const DEFAULT_MIN_PIECE_SIZE = 128n // 128 bytes minimum (required for PieceCID calculation)
-const DEFAULT_MAX_PIECE_SIZE = 34091302912n // 32 GiB minus fr32 padding (32GB * 127/128)
+// Default PDP configuration values (can be overridden per network)
+function getPDPDefaults(network) {
+  const baseDefaults = {
+    MIN_PIECE_SIZE: 127n,
+    MAX_PIECE_SIZE: (32n * 1024n ** 3n * 126n) / 127n, // ~32 GiB adjusted for fr32 padding (127/126 expansion)
+    STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
+    LOCATION: 'C=US;ST=Unknown;L=Unknown', // Default location (DN format) - required by contract
+  }
+
+  // Network-specific defaults
+  if (network === 'devnet') {
+    return {
+      ...baseDefaults,
+      IPNI_PIECE: false, // IPNI disabled for devnet
+      IPNI_IPFS: false, // IPNI disabled for devnet
+      MIN_PROVING_PERIOD_EPOCHS: 5, // 5 epochs for devnet (faster testing)
+    }
+  }
+
+  // Defaults for mainnet/calibration
+  return {
+    ...baseDefaults,
+    IPNI_PIECE: true,
+    IPNI_IPFS: true,
+    MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
+  }
+}
 
 // Parse command line arguments
 function parseArgs() {
@@ -160,7 +185,7 @@ function error(message) {
 }
 
 // Setup provider function
-async function setupProvider(deployerSigner, spSigner, provider, warmStorage, spRegistry, config) {
+async function setupProvider(deployerSigner, spSigner, provider, warmStorage, spRegistry, config, network) {
   const {
     spName,
     spDescription,
@@ -172,6 +197,9 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
     minProvingPeriod,
   } = config
   const spAddress = await spSigner.getAddress()
+  
+  // Get network-specific defaults
+  const pdpDefaults = getPDPDefaults(network)
 
   // === Step 1: Register Provider in ServiceProviderRegistry ===
   log('\n📋 Step 1: Service Provider Registration in Registry')
@@ -218,31 +246,51 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
     const contract = spRegistry._getRegistryContract().connect(spSigner)
     const registrationFee = await contract.REGISTRATION_FEE()
 
-    // Encode PDP offering for initial registration
+    // Get USDFC address for the network
+    let usdfcAddress = process.env.USDFC_ADDRESS
+    if (!usdfcAddress) {
+      if (network === 'devnet') {
+        error('USDFC_ADDRESS environment variable is required for devnet')
+        process.exit(1)
+      }
+      usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+      if (!usdfcAddress) {
+        error(`No default USDFC address for ${network} network. Please provide USDFC_ADDRESS environment variable.`)
+        process.exit(1)
+      }
+    }
+
+    // Convert monthly price to daily price (divide by ~30 days)
+    const storagePricePerTibPerDay = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+
+    // Prepare PDP offering for initial registration
     const pdpOffering = {
       serviceURL: spServiceUrl,
       minPieceSizeInBytes: minPieceSize,
       maxPieceSizeInBytes: maxPieceSize,
-      ipniPiece: false,
-      ipniIpfs: false,
-      storagePricePerTibPerMonth,
-      minProvingPeriodInEpochs: minProvingPeriod,
-      location,
-      paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+      ipniPiece: pdpDefaults.IPNI_PIECE,
+      ipniIpfs: pdpDefaults.IPNI_IPFS,
+      storagePricePerTibPerDay: storagePricePerTibPerDay,
+      minProvingPeriodInEpochs: BigInt(minProvingPeriod),
+      location: location || pdpDefaults.LOCATION,
+      paymentTokenAddress: usdfcAddress,
     }
 
-    const encodedOffering = await spRegistry.encodePDPOffering(pdpOffering)
+    // Prepare custom capabilities
+    const customCapabilities = {}
+
+    // Encode PDP offering into capability keys and values
+    const [pdpCapabilityKeys, pdpCapabilityValues] = encodePDPCapabilities(pdpOffering, customCapabilities)
 
     // Register with PDP product included
     // Use the SP's address as both serviceProvider (msg.sender) and payee
     const registerTx = await contract.registerProvider(
-      spSigner.address, // payee address (where payments go)
+      spAddress, // payee address (where payments go)
       spName,
       spDescription,
       0, // ProductType.PDP
-      encodedOffering,
-      location ? ['location'] : [], // capability keys
-      location ? [location] : [], // capability values
+      pdpCapabilityKeys,
+      pdpCapabilityValues,
       { value: registrationFee }
     )
 
@@ -271,25 +319,35 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
       log(`  Max Piece Size: ${pdpService.offering.maxPieceSizeInBytes} bytes`)
 
       // Check if we need to update the product
+      // Get USDFC address
+      let usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network]
+      if (!usdfcAddress) {
+        error(`No USDFC address for ${network}. Set USDFC_ADDRESS environment variable.`)
+        process.exit(1)
+      }
+
+      // Convert monthly to daily price for comparison
+      const dailyPrice = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+
       if (
         pdpService.offering.serviceURL !== spServiceUrl ||
         pdpService.offering.location !== location ||
-        pdpService.offering.storagePricePerTibPerMonth !== storagePricePerTibPerMonth
+        pdpService.offering.storagePricePerTibPerDay !== dailyPrice
       ) {
         log('Updating PDP product configuration...')
         const pdpData = {
           serviceURL: spServiceUrl,
           minPieceSizeInBytes: minPieceSize,
           maxPieceSizeInBytes: maxPieceSize,
-          ipniPiece: false,
-          ipniIpfs: false,
-          storagePricePerTibPerMonth,
-          minProvingPeriodInEpochs: minProvingPeriod,
-          location,
-          paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+          ipniPiece: pdpDefaults.IPNI_PIECE,
+          ipniIpfs: pdpDefaults.IPNI_IPFS,
+          storagePricePerTibPerDay: dailyPrice,
+          minProvingPeriodInEpochs: BigInt(minProvingPeriod),
+          location: location || pdpDefaults.LOCATION,
+          paymentTokenAddress: usdfcAddress,
         }
 
-        const capabilities = location ? { location } : {}
+        const capabilities = {}
         const updateTx = await spRegistry.updatePDPProduct(spSigner, pdpData, capabilities)
         await updateTx.wait(1)
         success(`PDP product updated. Tx: ${updateTx.hash}`)
@@ -298,19 +356,29 @@ async function setupProvider(deployerSigner, spSigner, provider, warmStorage, sp
   } else {
     // This shouldn't happen if registration worked correctly, but handle it just in case
     log('Provider missing PDP product, adding it now...')
+    
+    // Get USDFC address
+    let usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network]
+    if (!usdfcAddress) {
+      error(`No USDFC address for ${network}. Set USDFC_ADDRESS environment variable.`)
+      process.exit(1)
+    }
+
+    const dailyPrice = storagePricePerTibPerMonth / TIME_CONSTANTS.DAYS_PER_MONTH
+    
     const pdpData = {
       serviceURL: spServiceUrl,
       minPieceSizeInBytes: minPieceSize,
       maxPieceSizeInBytes: maxPieceSize,
-      ipniPiece: false,
-      ipniIpfs: false,
-      storagePricePerTibPerMonth,
-      minProvingPeriodInEpochs: minProvingPeriod,
-      location,
-      paymentTokenAddress: '0x0000000000000000000000000000000000000000',
+      ipniPiece: pdpDefaults.IPNI_PIECE,
+      ipniIpfs: pdpDefaults.IPNI_IPFS,
+      storagePricePerTibPerDay: dailyPrice,
+      minProvingPeriodInEpochs: BigInt(minProvingPeriod),
+      location: location || pdpDefaults.LOCATION,
+      paymentTokenAddress: usdfcAddress,
     }
 
-    const capabilities = location ? { location } : {}
+    const capabilities = {}
     const addProductTx = await spRegistry.addPDPProduct(spSigner, pdpData, capabilities)
     await addProductTx.wait(1)
     success(`PDP product added. Tx: ${addProductTx.hash}`)
@@ -339,9 +407,15 @@ async function setupClient(clientSigner, provider, warmStorage, warmStorageAddre
   // === Set up client payment approvals ===
   log('\n💰 Client Payment Setup')
 
-  // USDFC token address on calibration network
-  // This is a standard token address across all deployments
-  const usdfcAddress = '0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0'
+  // Get USDFC token address from environment or constants
+  const network = await getFilecoinNetworkType(provider)
+  const usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network]
+  
+  if (!usdfcAddress) {
+    error(`No USDFC address for ${network}. Set USDFC_ADDRESS environment variable.`)
+    process.exit(1)
+  }
+  
   log(`USDFC token address: ${usdfcAddress}`)
 
   // Create PaymentsService
@@ -466,8 +540,15 @@ async function main() {
     // This helps with Filecoin's slower block times
     provider._getConnection().timeout = 120000 // 2 minutes
 
-    // Create WarmStorage service
-    const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+    // Create WarmStorage service with devnet support
+    const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+    const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+    const warmStorage = await WarmStorageService.create(
+      provider,
+      warmStorageAddress,
+      multicall3Address,
+      warmStorageViewAddress
+    )
 
     // Variables to track what was setup
     let providerId = null
@@ -489,14 +570,17 @@ async function main() {
       const spName = process.env.SP_NAME || 'Test Service Provider'
       const spDescription = process.env.SP_DESCRIPTION || 'Test provider for Warm Storage'
 
+      // Get network-specific defaults
+      const pdpDefaults = getPDPDefaults(network)
+
       // PDP product configuration
-      const minPieceSize = BigInt(process.env.MIN_PIECE_SIZE || DEFAULT_MIN_PIECE_SIZE.toString())
-      const maxPieceSize = BigInt(process.env.MAX_PIECE_SIZE || DEFAULT_MAX_PIECE_SIZE.toString())
+      const minPieceSize = BigInt(process.env.MIN_PIECE_SIZE || pdpDefaults.MIN_PIECE_SIZE.toString())
+      const maxPieceSize = BigInt(process.env.MAX_PIECE_SIZE || pdpDefaults.MAX_PIECE_SIZE.toString())
       const storagePricePerTibPerMonth = BigInt(
-        process.env.STORAGE_PRICE_PER_TIB_PER_MONTH || DEFAULT_STORAGE_PRICE.toString()
+        process.env.STORAGE_PRICE_PER_TIB_PER_MONTH || pdpDefaults.STORAGE_PRICE_PER_TIB_PER_MONTH.toString()
       )
-      const minProvingPeriod = Number(process.env.MIN_PROVING_PERIOD || '2880')
-      const location = process.env.LOCATION || '' // Empty by default, X.509 DN format if provided
+      const minProvingPeriod = Number(process.env.MIN_PROVING_PERIOD || pdpDefaults.MIN_PROVING_PERIOD_EPOCHS.toString())
+      const location = process.env.LOCATION || pdpDefaults.LOCATION
 
       log(`\nProvider Configuration:`)
       log(`  Name: ${spName}`)
@@ -519,8 +603,9 @@ async function main() {
         log(`Auto-discovered ServiceProviderRegistry address: ${spRegistryAddress}`)
       }
 
-      // Create registry service
-      const spRegistry = new SPRegistryService(provider, spRegistryAddress)
+      // Create registry service with devnet support
+      const multicall3AddressForRegistry = process.env.MULTICALL3_ADDRESS || null
+      const spRegistry = new SPRegistryService(provider, spRegistryAddress, multicall3AddressForRegistry)
 
       // Setup provider
       const config = {
@@ -534,7 +619,7 @@ async function main() {
         minProvingPeriod,
       }
 
-      providerId = await setupProvider(deployerSigner, spSigner, provider, warmStorage, spRegistry, config)
+      providerId = await setupProvider(deployerSigner, spSigner, provider, warmStorage, spRegistry, config, network)
       providerName = spName
     }
 

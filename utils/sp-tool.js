@@ -10,21 +10,38 @@
  */
 
 import { ethers } from 'ethers'
-import { SPRegistryService } from '../packages/synapse-sdk/src/sp-registry/index.ts'
-import { CONTRACT_ADDRESSES, RPC_URLS } from '../packages/synapse-sdk/src/utils/constants.ts'
-import { getFilecoinNetworkType } from '../packages/synapse-sdk/src/utils/network.ts'
-import { WarmStorageService } from '../packages/synapse-sdk/src/warm-storage/index.ts'
+import { SPRegistryService } from '../packages/synapse-sdk/dist/src/sp-registry/index.js'
+import { CONTRACT_ADDRESSES, RPC_URLS, TIME_CONSTANTS } from '../packages/synapse-sdk/dist/src/utils/constants.js'
+import { getFilecoinNetworkType } from '../packages/synapse-sdk/dist/src/utils/network.js'
+import { WarmStorageService } from '../packages/synapse-sdk/dist/src/warm-storage/index.js'
+import { encodePDPCapabilities } from '../packages/synapse-core/dist/src/utils/pdp-capabilities.js'
 
-// Default PDP offering values
-const PDP_DEFAULTS = {
-  MIN_PIECE_SIZE: 127n,
-  MAX_PIECE_SIZE: (32n * 1024n ** 3n * 126n) / 127n, // ~32 GiB adjusted for fr32 padding (127/126 expansion)
-  IPNI_PIECE: true,
-  IPNI_IPFS: true,
-  STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
-  MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
-  LOCATION: '',
-  // PAYMENT_TOKEN_ADDRESS resolved dynamically from CONTRACT_ADDRESSES.USDFC[network]
+// Default PDP offering values (can be overridden per network)
+function getPDPDefaults(network) {
+  const baseDefaults = {
+    MIN_PIECE_SIZE: 127n,
+    MAX_PIECE_SIZE: (32n * 1024n ** 3n * 126n) / 127n, // ~32 GiB adjusted for fr32 padding (127/126 expansion)
+    STORAGE_PRICE_PER_TIB_PER_MONTH: 5000000000000000000n, // 5 USDFC (18 decimals)
+    LOCATION: 'C=US;ST=Unknown;L=Unknown', // Default location (DN format) - required by contract
+  }
+
+  // Network-specific defaults
+  if (network === 'devnet') {
+    return {
+      ...baseDefaults,
+      IPNI_PIECE: false, // IPNI disabled for devnet
+      IPNI_IPFS: false, // IPNI disabled for devnet
+      MIN_PROVING_PERIOD_EPOCHS: 5, // 5 epochs for devnet (faster testing)
+    }
+  }
+
+  // Defaults for mainnet/calibration
+  return {
+    ...baseDefaults,
+    IPNI_PIECE: true,
+    IPNI_IPFS: true,
+    MIN_PROVING_PERIOD_EPOCHS: 30, // 30 epochs (15 minutes on calibnet)
+  }
 }
 
 // Parse command line arguments
@@ -59,14 +76,18 @@ function parseArgs() {
 
 // Get or create SPRegistryService instance
 async function getRegistryService(provider, options) {
-  // Priority 1: Direct registry address
-  if (options.registry) {
-    console.log(`Using registry address: ${options.registry}`)
-    return new SPRegistryService(provider, options.registry)
+  // For devnet, get runtime addresses from environment variables
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+
+  // Priority 1: Direct registry address (from option or env)
+  const registryAddress = options.registry || process.env.SP_REGISTRY_ADDRESS
+  if (registryAddress) {
+    console.log(`Using registry address: ${registryAddress}`)
+    return new SPRegistryService(provider, registryAddress, multicall3Address)
   }
 
   // Priority 2: Discover from warm storage
-  let warmStorageAddress = options.warm
+  let warmStorageAddress = options.warm || process.env.WARM_STORAGE_CONTRACT_ADDRESS
 
   // Priority 3: Use default warm storage
   if (warmStorageAddress) {
@@ -74,15 +95,25 @@ async function getRegistryService(provider, options) {
   } else {
     const networkName = await getFilecoinNetworkType(provider)
     warmStorageAddress = CONTRACT_ADDRESSES.WARM_STORAGE[networkName]
+    if (!warmStorageAddress) {
+      console.error(`Error: No default Warm Storage address for ${networkName}. Please set WARM_STORAGE_CONTRACT_ADDRESS.`)
+      process.exit(1)
+    }
     console.log(`Using default WarmStorage for ${networkName}: ${warmStorageAddress}`)
   }
 
   // Create WarmStorageService and discover registry
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
-  const registryAddress = warmStorage.getServiceProviderRegistryAddress()
-  console.log(`Discovered registry: ${registryAddress}`)
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(
+    provider,
+    warmStorageAddress,
+    multicall3Address,
+    warmStorageViewAddress
+  )
+  const discoveredRegistryAddress = warmStorage.getServiceProviderRegistryAddress()
+  console.log(`Discovered registry: ${discoveredRegistryAddress}`)
 
-  return new SPRegistryService(provider, registryAddress)
+  return new SPRegistryService(provider, discoveredRegistryAddress, multicall3Address)
 }
 
 // Validate Distinguished Name (DN) format for location
@@ -310,10 +341,18 @@ async function handleWarmAdd(provider, signer, options) {
     process.exit(1)
   }
 
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  const warmStorageAddress = options.warm || process.env.WARM_STORAGE_CONTRACT_ADDRESS || CONTRACT_ADDRESSES.WARM_STORAGE[network]
+
+  if (!warmStorageAddress) {
+    console.error(`Error: No WarmStorage address available. Please set WARM_STORAGE_CONTRACT_ADDRESS or use --warm.`)
+    process.exit(1)
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress, multicall3Address, warmStorageViewAddress)
 
   // Get current approved providers
   const currentProviders = await warmStorage.getApprovedProviderIds()
@@ -342,10 +381,18 @@ async function handleWarmRemove(provider, signer, options) {
     process.exit(1)
   }
 
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  const warmStorageAddress = options.warm || process.env.WARM_STORAGE_CONTRACT_ADDRESS || CONTRACT_ADDRESSES.WARM_STORAGE[network]
+
+  if (!warmStorageAddress) {
+    console.error(`Error: No WarmStorage address available. Please set WARM_STORAGE_CONTRACT_ADDRESS or use --warm.`)
+    process.exit(1)
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress, multicall3Address, warmStorageViewAddress)
 
   console.log(`\nRemoving provider #${options.id} from WarmStorage approved list...`)
 
@@ -369,10 +416,18 @@ async function handleWarmRemove(provider, signer, options) {
 }
 
 async function handleWarmList(provider, options) {
-  const warmStorageAddress = options.warm || CONTRACT_ADDRESSES.WARM_STORAGE[await getFilecoinNetworkType(provider)]
+  const network = await getFilecoinNetworkType(provider)
+  const warmStorageAddress = options.warm || process.env.WARM_STORAGE_CONTRACT_ADDRESS || CONTRACT_ADDRESSES.WARM_STORAGE[network]
+
+  if (!warmStorageAddress) {
+    console.error(`Error: No WarmStorage address available. Please set WARM_STORAGE_CONTRACT_ADDRESS or use --warm.`)
+    process.exit(1)
+  }
 
   console.log(`Using WarmStorage: ${warmStorageAddress}`)
-  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress)
+  const multicall3Address = process.env.MULTICALL3_ADDRESS || null
+  const warmStorageViewAddress = process.env.WARM_STORAGE_VIEW_ADDRESS || null
+  const warmStorage = await WarmStorageService.create(provider, warmStorageAddress, multicall3Address, warmStorageViewAddress)
 
   console.log('\nFetching WarmStorage approved providers...\n')
 
@@ -405,8 +460,12 @@ async function handleWarmList(provider, options) {
 
 // Command handlers
 async function handleRegister(provider, signer, options) {
-  if (!options.name || !options.http) {
+  // Get service URL from option, env var, or error
+  const serviceURL = (typeof options.http === 'string' && options.http) ? options.http : process.env.SP_SERVICE_URL
+  
+  if (!options.name || !serviceURL) {
     console.error('Error: --name and --http are required for registration')
+    console.error('Provide --http <url> or set SP_SERVICE_URL environment variable')
     process.exit(1)
   }
 
@@ -415,43 +474,57 @@ async function handleRegister(provider, signer, options) {
 
   console.log(`\nRegistering provider:`)
   console.log(`  Name: ${options.name}`)
-  console.log(`  HTTP: ${options.http}`)
+  console.log(`  HTTP: ${serviceURL}`)
   console.log(`  Payee: ${payee}`)
   console.log(`  Description: ${options.description || '(none)'}`)
   console.log(`  Registration Fee: 5 FIL`)
 
   try {
-    // Use the SDK's registerProvider method which already handles the contract details
-    // Note: registerProvider in SDK doesn't handle the fee, we need to do it ourselves
+    // Get contract and registration fee
     const contract = registry._getRegistryContract().connect(signer)
     const registrationFee = await contract.REGISTRATION_FEE()
 
-    // Get network-specific USDFC address
+    // Get network-specific USDFC address (check env var first for devnet)
     const network = await getFilecoinNetworkType(provider)
-    const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+    const usdfcAddress = options['payment-token'] || process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network]
 
-    // Encode PDP offering
-    const encodedOffering = await registry.encodePDPOffering({
-      serviceURL: options.http,
-      minPieceSizeInBytes: PDP_DEFAULTS.MIN_PIECE_SIZE,
-      maxPieceSizeInBytes: PDP_DEFAULTS.MAX_PIECE_SIZE,
-      ipniPiece: PDP_DEFAULTS.IPNI_PIECE,
-      ipniIpfs: PDP_DEFAULTS.IPNI_IPFS,
-      storagePricePerTibPerMonth: PDP_DEFAULTS.STORAGE_PRICE_PER_TIB_PER_MONTH,
-      minProvingPeriodInEpochs: PDP_DEFAULTS.MIN_PROVING_PERIOD_EPOCHS,
-      location: options.location || PDP_DEFAULTS.LOCATION,
-      paymentTokenAddress: options['payment-token'] || usdfcAddress,
-    })
+    if (!usdfcAddress) {
+      console.error(`Error: USDFC address not found for ${network} network.`)
+      console.error(`For devnet, please set USDFC_ADDRESS environment variable or use --payment-token flag.`)
+      process.exit(1)
+    }
 
-    // Prepare capability arrays from --capability flags
+    // Get network-specific defaults
+    const pdpDefaults = getPDPDefaults(network)
+
+    // Convert monthly price to daily price (divide by ~30 days)
+    const storagePricePerTibPerDay = pdpDefaults.STORAGE_PRICE_PER_TIB_PER_MONTH / TIME_CONSTANTS.DAYS_PER_MONTH
+
+    // Prepare PDP offering object
+    const pdpOffering = {
+      serviceURL: serviceURL,
+      minPieceSizeInBytes: pdpDefaults.MIN_PIECE_SIZE,
+      maxPieceSizeInBytes: pdpDefaults.MAX_PIECE_SIZE,
+      ipniPiece: options['ipni-piece'] !== undefined ? options['ipni-piece'] === 'true' : pdpDefaults.IPNI_PIECE,
+      ipniIpfs: options['ipni-ipfs'] !== undefined ? options['ipni-ipfs'] === 'true' : pdpDefaults.IPNI_IPFS,
+      storagePricePerTibPerDay: storagePricePerTibPerDay,
+      minProvingPeriodInEpochs: options['min-proving-period']
+        ? BigInt(options['min-proving-period'])
+        : BigInt(pdpDefaults.MIN_PROVING_PERIOD_EPOCHS),
+      location: options.location || pdpDefaults.LOCATION,
+      paymentTokenAddress: usdfcAddress,
+    }
+
+    // Prepare custom capabilities from --capability flags
+    const customCapabilities = {}
     const capabilities = normalizeCapabilities(options.capability)
-    const capabilityKeys = []
-    const capabilityValues = []
     for (const cap of capabilities) {
       const [key, value] = cap.split('=')
-      capabilityKeys.push(key)
-      capabilityValues.push(value)
+      customCapabilities[key] = value
     }
+
+    // Encode PDP offering into capability keys and values
+    const [pdpCapabilityKeys, pdpCapabilityValues] = encodePDPCapabilities(pdpOffering, customCapabilities)
 
     // Call registerProvider with value
     const tx = await contract.registerProvider(
@@ -459,9 +532,8 @@ async function handleRegister(provider, signer, options) {
       options.name,
       options.description || '',
       0, // ProductType.PDP
-      encodedOffering,
-      capabilityKeys,
-      capabilityValues,
+      pdpCapabilityKeys,
+      pdpCapabilityValues,
       { value: registrationFee }
     )
 
@@ -577,9 +649,15 @@ async function handlePDPUpdate(registry, signer, options, provider) {
   // Validate inputs before processing
   validatePDPInputs(options)
 
-  // Get network-specific USDFC address
+  // Get network-specific USDFC address (check env var first for devnet)
   const network = await getFilecoinNetworkType(provider)
-  const usdfcAddress = CONTRACT_ADDRESSES.USDFC[network]
+  const usdfcAddress = process.env.USDFC_ADDRESS || CONTRACT_ADDRESSES.USDFC[network]
+
+  if (!usdfcAddress && !options['payment-token'] && !currentPDP?.offering.paymentTokenAddress) {
+    console.error(`Error: USDFC address not found for ${network} network.`)
+    console.error(`For devnet, please set USDFC_ADDRESS environment variable or use --payment-token flag.`)
+    process.exit(1)
+  }
 
   // Prepare updated PDP offering by merging current values with new ones
   const updatedOffering = {
@@ -833,8 +911,8 @@ Examples:
     process.exit(0)
   }
 
-  // Setup provider based on network flag
-  const network = options.network || 'calibration'
+  // Setup provider based on network flag (check env var first)
+  const network = options.network || process.env.NETWORK || 'calibration'
   if (network !== 'mainnet' && network !== 'calibration' && network !== 'devnet') {
     console.error(`Error: Invalid network '${network}'. Must be 'mainnet', 'calibration', or 'devnet'`)
     process.exit(1)
@@ -845,11 +923,11 @@ Examples:
   if (!defaultRpcUrl) {
     defaultRpcUrl = RPC_URLS[network]?.http
   }
-  if (!options['rpc-url'] && !defaultRpcUrl) {
-    console.error(`Error: No RPC URL available for network '${network}'. Please provide --rpc-url.`)
+  if (!options['rpc-url'] && !process.env.RPC_URL && !defaultRpcUrl) {
+    console.error(`Error: No RPC URL available for network '${network}'. Please provide --rpc-url or RPC_URL env var.`)
     process.exit(1)
   }
-  const rpcUrl = options['rpc-url'] || defaultRpcUrl
+  const rpcUrl = options['rpc-url'] || process.env.RPC_URL || defaultRpcUrl
 
   // Smart provider selection based on URL protocol
   let provider
@@ -872,11 +950,13 @@ Examples:
   // Setup signer if needed
   let signer = null
   if (['register', 'update', 'deregister', 'warm-add', 'warm-remove'].includes(command)) {
-    if (!options.key) {
-      console.error('Error: --key is required for write operations')
+    // Try to get key from command line option or environment variable
+    const privateKey = options.key || process.env.SP_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+    if (!privateKey) {
+      console.error('Error: --key is required for write operations (or set SP_PRIVATE_KEY, DEPLOYER_PRIVATE_KEY, or CLIENT_PRIVATE_KEY environment variable)')
       process.exit(1)
     }
-    signer = new ethers.Wallet(options.key, provider)
+    signer = new ethers.Wallet(privateKey, provider)
     console.log(`Using signer address: ${await signer.getAddress()}`)
   }
 
