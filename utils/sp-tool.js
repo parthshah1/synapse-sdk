@@ -951,9 +951,26 @@ Examples:
   let signer = null
   if (['register', 'update', 'deregister', 'warm-add', 'warm-remove'].includes(command)) {
     // Try to get key from command line option or environment variable
-    const privateKey = options.key || process.env.SP_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+    // Different priority for different commands
+    let privateKey = options.key
+    
     if (!privateKey) {
-      console.error('Error: --key is required for write operations (or set SP_PRIVATE_KEY, DEPLOYER_PRIVATE_KEY, or CLIENT_PRIVATE_KEY environment variable)')
+      if (['warm-add', 'warm-remove'].includes(command)) {
+        // For WarmStorage operations, prioritize DEPLOYER_PRIVATE_KEY
+        privateKey = process.env.DEPLOYER_PRIVATE_KEY || process.env.SP_PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+      } else {
+        // For SP operations, prioritize SP_PRIVATE_KEY
+        privateKey = process.env.SP_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || process.env.CLIENT_PRIVATE_KEY
+      }
+    }
+    
+    if (!privateKey) {
+      console.error('Error: --key is required for write operations')
+      if (['warm-add', 'warm-remove'].includes(command)) {
+        console.error('  Or set DEPLOYER_PRIVATE_KEY environment variable (WarmStorage owner)')
+      } else {
+        console.error('  Or set SP_PRIVATE_KEY, DEPLOYER_PRIVATE_KEY, or CLIENT_PRIVATE_KEY environment variable')
+      }
       process.exit(1)
     }
     signer = new ethers.Wallet(privateKey, provider)
