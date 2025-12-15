@@ -30,7 +30,7 @@ import * as Piece from './piece.ts'
 import { SIZE_CONSTANTS } from './utils/constants.ts'
 import { createPieceUrl } from './utils/piece-url.ts'
 
-let TIMEOUT = 1000 * 60 * 5 // 5 minutes
+let TIMEOUT = 1000 * 60 * 30 // 30 minutes
 export const RETRIES = Infinity
 export const FACTOR = 1
 export const MIN_TIMEOUT = 4000 // interval between retries in milliseconds
